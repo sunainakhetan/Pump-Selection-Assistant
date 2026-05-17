@@ -695,7 +695,7 @@ def render_recommendations(scored: pd.DataFrame | None, lift_flag_list):
         unsafe_allow_html=True,
     )
 
-    for rank, (_, row) in enumerate(view.head(5).iterrows(), start=1):
+    for rank, (_, row) in enumerate(view.head(20).iterrows(), start=1):
         render_card(rank, row, lift_flag_list)
 
     if len(view) == 0:
