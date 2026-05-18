@@ -64,19 +64,38 @@ If you ever need a private app with login, Streamlit Cloud's free plan also supp
 
 ## Verifying it works
 
-The filtering doc contains a fully worked example (section 9–15) ending with the Lubi MH4-5B at score 97, 144 surviving candidates. Enter these answers to reproduce:
+The filtering document contains a fully worked example in sections 9-15. Enter these answers to reproduce it:
 
 - Job: Boost pressure from existing storage or supply
 - Source: Overhead tank
 - Lift: 3rd floor
 - Demand: Medium
 - Setting: Home
-- Outlets: 5–12 outlets (the underlying outlet count for the example is 6)
+- Outlets: 5-12 outlets
 - Usage: Moderate
-- Phase: Single-phase (default)
-- Voltage: Normal voltage (200–240 V)
+- Phase: Single-phase
+- Voltage: Normal voltage (200-240 V)
 
-You should see Lubi MH4-5B at the top with score 97, and the filter trace should end at 144 rows. *(Note: the worked example in the doc explicitly uses an 18 m minimum / 25 m typical head for the 3rd-floor band to preserve its arithmetic. The standard mapping for 3rd floor is 12 m / 18 m; the app uses the standard mapping in production. To match the doc's exact 144-row count and top-5 list, you can verify against `_verify.py`.)*
+The app uses the representative outlet count for each outlet band. For the 5-12 outlets band, the representative count is 8.
+
+For this example, the requirement vector should use:
+
+- Required minimum head: 12 m
+- Typical head: 18 m
+- Required minimum flow: 2,500 LPH
+- Typical flow: 3,500 LPH
+- Allowed phase: Single or Both
+- Preferred HP cap: 3 HP, with a hard cap at 6 HP
+
+You should see 101 surviving SKUs after filtering. The top five should be:
+
+1. Shakti SH4-3 — score 96
+2. Shakti SHI4-3 — score 96
+3. Shakti SHN4-3 — score 96
+4. Kirloskar Brothers CPBS-62824H / V — score 94
+5. Lubi MH 1A — score 93
+
+You can also run `_verify.py` to print the requirement vector, filter trace, and top-five table from the Excel catalogue.
 
 ## Source of truth
 
