@@ -43,7 +43,7 @@ for t in trace:
     print(f"  Step {t['step']}: {t['label']:<60} → {t['rows_left']}")
 
 scored = score_skus(survivors, vec)
-print(f"\n=== Survivors after filtering: {len(scored)} (doc expects 144) ===")
+print(f"\n=== Survivors after filtering: {len(scored)} (doc expects 101) ===")
 
 print("\n=== Top 5 ===")
 cols = ["Brand", "SKU", "Type", "HP", "Min Head (m)", "Max Head (m)",
@@ -52,8 +52,8 @@ cols = ["Brand", "SKU", "Type", "HP", "Min Head (m)", "Max Head (m)",
 print(scored.head(5)[cols].to_string(index=False))
 
 print("\n=== Doc expectation for Top 5 ===")
-print("1 Lubi MH4-5B   Hydropneumatic 1.25 16-35 0-7500    Single 97")
-print("2 Lubi MH 5A    Hydropneumatic 1.25 16-35 0-7500    Single 97")
-print("3 Falcon MDP-133 Hydropneumatic 1.0  8-40  0-6000   Single 95")
-print("4 V-Guard VB24-TF3A Hydropneumatic 0.75 12-36 1100-5250 Single 94")
-print("5 Shakti SH4-4  Hydropneumatic 1.0  12-35 0-7980    Both  94")
+print("1 Shakti SH4-3             Hydropneumatic 0.75 9-26  0-7980     Both   96")
+print("2 Shakti SHI4-3            Hydropneumatic 0.75 9-26  0-7980     Both   96")
+print("3 Shakti SHN4-3            Hydropneumatic 0.75 9-26  0-7980     Both   96")
+print("4 Kirloskar CPBS-62824H / V Hydropneumatic 0.80 6-35 1200-6000  Single 94")
+print("5 Lubi MH 1A               Hydropneumatic 0.75 12-22 0-7500     Single 93")
