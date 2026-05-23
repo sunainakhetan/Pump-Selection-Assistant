@@ -49,25 +49,37 @@ if css_path.exists():
 
 
 # ---------------------------------------------------------------------------
-# Extra CSS for the revised compact clickable option cards
+# Extra CSS for clickable option cards
 # ---------------------------------------------------------------------------
 
 COMPACT_CARD_CSS = """
 <style>
-/* Make Streamlit buttons behave like compact option cards */
+/* Clickable option boxes — two per row through Streamlit columns */
 [class*="st-key-optwrap_"] .stButton > button {
-  min-height: 108px !important;
-  padding: 12px 13px !important;
-  border-radius: 16px !important;
+  min-height: 176px !important;
+  height: 176px !important;
+  padding: 24px 28px !important;
+  border-radius: 24px !important;
   text-align: left !important;
   white-space: pre-wrap !important;
-  line-height: 1.25 !important;
-  font-size: 0.82rem !important;
-  font-weight: 750 !important;
+  line-height: 1.32 !important;
+  font-size: 1.02rem !important;
+  font-weight: 500 !important;
   background: #ffffff !important;
   border: 1px solid var(--line, #e2e8f0) !important;
   color: var(--ink, #0f172a) !important;
   box-shadow: none !important;
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
+}
+
+[class*="st-key-optwrap_"] .stButton > button p {
+  margin: 0 !important;
+}
+
+[class*="st-key-optwrap_"] .stButton > button strong {
+  font-weight: 900 !important;
+  color: var(--ink, #0f172a) !important;
 }
 
 [class*="st-key-optwrap_"] .stButton > button:hover:not(:disabled) {
@@ -77,13 +89,17 @@ COMPACT_CARD_CSS = """
 }
 
 [class*="st-key-optwrap_"] .stButton > button:disabled {
-  background: #f1f5f9 !important;
+  background: #f8fafc !important;
   color: #94a3b8 !important;
   border-color: #e2e8f0 !important;
 }
 
+[class*="st-key-optwrap_"] .stButton > button:disabled strong {
+  color: #94a3b8 !important;
+}
+
 .compact-question-panel {
-  padding-bottom: 10px;
+  padding-bottom: 18px;
 }
 
 .detailed-rec-card {
@@ -110,7 +126,8 @@ COMPACT_CARD_CSS = """
   }
 
   [class*="st-key-optwrap_"] .stButton > button {
-    min-height: 92px !important;
+    min-height: 150px !important;
+    height: auto !important;
   }
 }
 </style>
@@ -471,7 +488,6 @@ OPTION_DESCRIPTIONS = {
     },
 }
 
-
 FIELD_ORDER = [
     "setting",
     "job",
@@ -495,10 +511,6 @@ FIELD_ORDER = [
 ]
 
 PRESSURE_JOBS = {"boost_pressure", "lift_and_pressurise_directly"}
-
-DESCRIPTIONS = {
-    "setting": "Setting comes first in Framework v0.6 because it controls demand bands, phase defaults, and C5a/C9 variants.",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -548,9 +560,10 @@ def option_description(field: str, option_id) -> str:
         setting = ans.get("setting")
         return DEMAND_DESCRIPTIONS_BY_SETTING.get(setting, {}).get(option_id, "")
 
-    if field in {"c9_min_v", "c9_max_v"}:
-        if field == "c9_min_v":
-            return "Lowest voltage usually available at the pump site."
+    if field == "c9_min_v":
+        return "Lowest voltage usually available at the pump site."
+
+    if field == "c9_max_v":
         return "Highest voltage usually available at the pump site."
 
     return OPTION_DESCRIPTIONS.get(field, {}).get(option_id, "")
@@ -569,7 +582,7 @@ def render_option(field: str, opt, ans: dict, force_disabled_reason: str | None 
     selected = ans.get(field) == oid
     desc = option_description(field, oid)
 
-    button_label = f"{'✓ ' if selected else ''}{label}"
+    button_label = f"{'✓ ' if selected else ''}**{label}**"
 
     if desc:
         button_label += f"\n\n{desc}"
@@ -598,7 +611,7 @@ def render_question(
     options,
     help_text: str = "",
     force_disabled_reason: str | None = None,
-    columns_per_row: int = 4,
+    columns_per_row: int = 2,
 ):
     ans = current_answers()
 
@@ -1011,7 +1024,7 @@ def main():
             "What kind of place is it?",
             "setting",
             SETTING_OPTIONS,
-            DESCRIPTIONS["setting"],
+            "",
         )
 
         ans = current_answers()
@@ -1021,7 +1034,6 @@ def main():
             "What is the pump supposed to do?",
             "job",
             JOB_OPTIONS,
-            force_disabled_reason=None if ans.get("setting") else "Select Setting first.",
         )
 
         ans = current_answers()
@@ -1031,7 +1043,6 @@ def main():
             "Where is the water coming from?",
             "source",
             SOURCE_OPTIONS,
-            force_disabled_reason=None if ans.get("job") else "Select Job first.",
         )
 
         ans = current_answers()
@@ -1041,18 +1052,17 @@ def main():
             "How high does the water need to go?",
             "lift",
             LIFT_OPTIONS,
-            force_disabled_reason=None if ans.get("source") else "Select Source first.",
         )
 
         ans = current_answers()
 
         if ans.get("setting"):
             demand_options = DEMAND_OPTIONS_BY_SETTING[ans["setting"]]
-            demand_help = "Demand bands are setting-specific; internally they map to representative daily volume."
-            demand_disabled_reason = None if ans.get("lift") else "Select Lift first."
+            demand_help = "Demand bands are setting-specific and change based on the selected Setting."
+            demand_disabled_reason = None
         else:
             demand_options = [("placeholder", "Select a setting to see the correct demand bands")]
-            demand_help = "Demand options depend on the Setting selected in Step 1."
+            demand_help = ""
             demand_disabled_reason = "Select Setting first."
 
         render_question(
