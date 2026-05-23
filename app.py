@@ -53,18 +53,7 @@ if css_path.exists():
 # ---------------------------------------------------------------------------
 
 COMPACT_CARD_CSS = """
-.warning-pill {
-  display: inline-flex;
-  align-items: center;
-  margin: 8px 0 14px 0;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  color: #9a3412;
-  font-weight: 750;
-  font-size: 0.86rem;
-  line-height: 1.25;
+
 }
 <style>
 /* Clickable option boxes — clean 2-column layout */
@@ -160,6 +149,19 @@ COMPACT_CARD_CSS = """
     min-height: 170px !important;
     padding: 22px 24px !important;
   }
+}
+.warning-pill {
+  display: inline-flex;
+  align-items: center;
+  margin: 8px 0 14px 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-weight: 750;
+  font-size: 0.86rem;
+  line-height: 1.25;
 }
 </style>
 """
