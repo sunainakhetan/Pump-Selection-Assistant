@@ -54,7 +54,6 @@ if css_path.exists():
 
 COMPACT_CARD_CSS = """
 
-}
 <style>
 /* Clickable option boxes — clean 2-column layout */
 [class*="st-key-optwrap_"] .stButton {
