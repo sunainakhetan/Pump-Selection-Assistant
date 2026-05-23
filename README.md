@@ -103,3 +103,42 @@ You can also run `_verify.py` to print the requirement vector, filter trace, and
 - **Rules, mappings, filters, scoring**: the two Word documents (`Pump_UseCase_Framework___mapping_tables_FINAL.docx`, `FILTERING_AND_SCORING_MECHANISM_FINAL.docx`). All numbers in `vector.py`, `rules.py`, and `scoring.py` come from those documents — nothing is invented.
 
 If a rule or threshold needs to change, update the relevant constant in `vector.py` or `rules.py` and the doc, then redeploy.
+
+# Pump Selection Assistant — Framework v0.6 build
+
+A Streamlit pump-selection assistant updated to the revised framework, calculation mechanism, and current 4,056-row master datasheet.
+
+## What changed in this build
+
+- Customer journey now starts with **Setting**, followed by Job, Source, Lift, setting-specific Demand, and triggered conditional factors.
+- Demand now uses setting-specific customer-facing bands mapped internally to representative daily volume, default run-time, minimum flow, and typical flow.
+- Added **C5a — Fixture / Application Pressure Class** as a required pressure-job conditional factor.
+- C5a adds head to both minimum and typical head; Home premium fixtures with 1–4 or 5–12 outlets also apply the 3,000 / 3,500 LPH flow floor.
+- Replaced the old voltage logic with the revised always-triggered **C9** model:
+  - Home / small-commercial single-phase: two-band picker.
+  - Farm single-phase: Min V / Max V range.
+  - Three-phase variants: Min V / Max V range.
+- Updated C1 borewell V-code eligibility, including V2.5 as 4-inch class and V3 fitment flags.
+- Added C6 Self-Priming speed/RPM handling for clean and lightly-soiled water.
+- Updated verification to the new worked example: Large-commercial borewell, 11–15 floors, 6-inch casing, 200–300 ft, Heavy duty, three-phase 380–430 V.
+- Preserved the original visual style: hero shell, cyan/white palette, card grid, sticky side panel, recommendation cards, and status/metric cards.
+
+## Files
+
+```text
+app.py                              — Streamlit UI with retained visual system
+style.css                           — original UI styling, separated for readability
+vector.py                           — Framework v0.6 answer-to-vector mapping
+rules.py                            — v0.6 invalidity rules / UI disabling logic
+scoring.py                          — v0.6 filter pipeline and scoring
+_verify.py                          — worked-example verification
+requirements.txt                    — dependencies
+FINAL_MASTER_DATASHEET_final.xlsx   — updated master datasheet
+config.toml                         — Streamlit theme
+
+run locally
+pip install -r requirements.txt
+streamlit run app.py
+
+verify the worked example
+python _verify.py
