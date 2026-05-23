@@ -991,6 +991,14 @@ def render_card(rank, row):
     )
 
 
+
+def has_borewell_recommendations(scored) -> bool:
+    if scored is None or len(scored) == 0 or "Type" not in scored.columns:
+        return False
+
+    return scored["Type"].astype(str).str.lower().str.contains("borewell", na=False).any()
+
+
 def render_recommendations(scored):
     st.markdown('<div class="side-panel">', unsafe_allow_html=True)
     st.markdown(
@@ -998,6 +1006,16 @@ def render_recommendations(scored):
         '<p class="side-subtitle">Top 20 matches from the updated catalogue.</p>',
         unsafe_allow_html=True,
     )
+
+    if has_borewell_recommendations(scored):
+        st.markdown(
+            """
+            <div class="warning-pill">
+              If your borewell is prone to sand shedding, we recommend using a compressor pump.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     if scored is None:
         st.markdown(
@@ -1030,7 +1048,7 @@ def render_recommendations(scored):
             render_card(i, row)
 
     st.markdown("</div>", unsafe_allow_html=True)
-
+    
 
 # ---------------------------------------------------------------------------
 # Main app
