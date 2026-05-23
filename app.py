@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from rules import evaluate, is_disabled
+from rules import evaluate
 from scoring import filter_skus, lift_flags, score_skus
 from vector import (
     SETTING_DEFAULTS,
@@ -54,30 +54,48 @@ if css_path.exists():
 
 COMPACT_CARD_CSS = """
 <style>
-/* Clickable option boxes — two per row through Streamlit columns */
+/* Clickable option boxes — clean 2-column layout */
+[class*="st-key-optwrap_"] .stButton {
+  height: 100%;
+}
+
 [class*="st-key-optwrap_"] .stButton > button {
-  min-height: 176px !important;
-  height: 176px !important;
-  padding: 24px 28px !important;
+  min-height: 218px !important;
+  height: auto !important;
+  width: 100% !important;
+  padding: 26px 30px !important;
   border-radius: 24px !important;
   text-align: left !important;
-  white-space: pre-wrap !important;
-  line-height: 1.32 !important;
+  white-space: normal !important;
+  line-height: 1.36 !important;
   font-size: 1.02rem !important;
   font-weight: 500 !important;
   background: #ffffff !important;
   border: 1px solid var(--line, #e2e8f0) !important;
   color: var(--ink, #0f172a) !important;
   box-shadow: none !important;
+  display: flex !important;
   align-items: flex-start !important;
   justify-content: flex-start !important;
+  overflow: visible !important;
 }
 
+[class*="st-key-optwrap_"] .stButton > button div,
 [class*="st-key-optwrap_"] .stButton > button p {
+  width: 100% !important;
   margin: 0 !important;
+  padding: 0 !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
 }
 
 [class*="st-key-optwrap_"] .stButton > button strong {
+  display: block !important;
+  margin-bottom: 18px !important;
+  font-size: calc(1.02rem + 2pt) !important;
+  line-height: 1.24 !important;
   font-weight: 900 !important;
   color: var(--ink, #0f172a) !important;
 }
@@ -126,8 +144,8 @@ COMPACT_CARD_CSS = """
   }
 
   [class*="st-key-optwrap_"] .stButton > button {
-    min-height: 150px !important;
-    height: auto !important;
+    min-height: 170px !important;
+    padding: 22px 24px !important;
   }
 }
 </style>
@@ -162,7 +180,7 @@ SOURCE_OPTIONS = [
     ("overhead_tank", "Overhead tank"),
     ("municipal", "Municipal line / direct supply"),
     ("sewage_pit", "Sewage or drainage pit"),
-    ("open_ground", "Open ground water (canal, river, farm channel)"),
+    ("open_ground", "Open ground water"),
 ]
 
 LIFT_OPTIONS = [
@@ -222,47 +240,47 @@ DEMAND_OPTIONS_BY_SETTING = {
 DEMAND_DESCRIPTIONS_BY_SETTING = {
     "home": {
         "vol_200": "1 resident. Single-person flat or studio, typically 1 bathroom, minimal kitchen use.",
-        "vol_800": "2–5 residents. Small family with 1 bathroom, 1-BHK or compact 2-BHK flat, regular kitchen and laundry use.",
-        "vol_2000": "5–15 residents. Nuclear or joint family with 2–4 bathrooms, 3–4 BHK flat or villa, multiple bathrooms in regular use, possibly a small garden.",
-        "vol_5000": "Large independent home or small farmhouse with 5+ bathrooms, garden, car-wash area, occasional pool top-up, or staff quarters.",
+        "vol_800": "2–5 residents. Small family with 1 bathroom, compact flat, regular kitchen and laundry use.",
+        "vol_2000": "5–15 residents. Family with 2–4 bathrooms, larger flat or villa, possibly a small garden.",
+        "vol_5000": "Large home or farmhouse with 5+ bathrooms, garden, car-wash area, pool top-up, or staff quarters.",
     },
     "farm": {
-        "vol_800": "Small homestead or farmhouse domestic use only. No field irrigation. A few animals or hand-watered kitchen garden.",
-        "vol_2000": "Larger homestead or backyard livestock only. Farmhouse use plus animal washing, troughs, or hand-watered garden.",
-        "vol_10000": "Very small irrigated plot or small dairy. Drip up to ~⅓ acre, sprinkler up to ~¼ acre, or livestock-only small dairy.",
-        "vol_50000": "Small-to-mid irrigated farm. Drip ~⅓–1.5 acres, sprinkler ~¼–1 acre, or small dairy with attached fodder plot.",
-        "vol_200000": "Mid-to-large commercial farm. Drip ~1.5–6 acres, sprinkler ~1–5 acres, flood/furrow for smaller event areas, or large livestock use.",
-        "vol_above_200000": "Large commercial farm, estate, or plantation. Usually 6+ acres drip, 5+ acres sprinkler, large flood events, or major livestock operation.",
+        "vol_800": "Small homestead or farmhouse domestic use only. No field irrigation.",
+        "vol_2000": "Larger homestead or backyard livestock only, with troughs or hand-watered garden.",
+        "vol_10000": "Very small irrigated plot or small dairy. Drip up to ~⅓ acre or sprinkler up to ~¼ acre.",
+        "vol_50000": "Small-to-mid irrigated farm. Drip ~⅓–1.5 acres or sprinkler ~¼–1 acre.",
+        "vol_200000": "Mid-to-large commercial farm with drip, sprinkler, flood/furrow, or large livestock use.",
+        "vol_above_200000": "Large farm, estate, plantation, major irrigation, or major livestock operation.",
     },
     "shop_small_comm": {
         "vol_200": "Kiosk or single-staff outlet with 1–2 staff and one shared washroom.",
-        "vol_800": "Small shop or compact office with 3–15 staff, 1–2 washrooms, and basic kitchenette or pantry.",
-        "vol_2000": "Mid-size office, clinic, or retail premises with 15–40 staff, 2–4 washrooms, pantry, or basic equipment cleaning.",
-        "vol_5000": "Large office floor or small restaurant with 40–100 staff, multiple washrooms, canteen, or kitchen use.",
-        "vol_10000": "Large standalone commercial premises, 100–200 staff, mid-size restaurant, small guesthouse, or small banquet hall.",
+        "vol_800": "Small shop or compact office with 3–15 staff, 1–2 washrooms, and pantry.",
+        "vol_2000": "Mid-size office, clinic, or retail premises with 15–40 staff and 2–4 washrooms.",
+        "vol_5000": "Large office floor or small restaurant with multiple washrooms, canteen, or kitchen use.",
+        "vol_10000": "Large standalone commercial premises, mid-size restaurant, guesthouse, or banquet hall.",
     },
     "large_commercial": {
-        "vol_5000": "Very small institutional premises: 4–9 flats, 5–10 budget hotel rooms, small school block, hostel, or common washroom block.",
-        "vol_10000": "Small institutional premises: 9–18 flats, 10–20 hotel rooms, small school, hostel, or nursing home.",
-        "vol_50000": "Mid-size institutional premises: 18–90 flats, 30–100 hotel rooms, school, hostel, or 25–100 bed hospital.",
-        "vol_200000": "Large institutional premises: 90–370 flats, large hotel, college/school campus, hostel block, or 100–400 bed hospital.",
-        "vol_above_200000": "Very large institutional premises: multi-tower complex, township, 500+ room hotel, large campus, or 400+ bed hospital.",
+        "vol_5000": "Very small institution: small apartment block, budget hotel, school block, hostel, or washroom block.",
+        "vol_10000": "Small institution: apartment block, hotel, school, hostel, or small nursing home.",
+        "vol_50000": "Mid-size institution: apartment block, hotel, school, hostel, or 25–100 bed hospital.",
+        "vol_200000": "Large institution: large apartment block, hotel, campus, hostel block, or hospital.",
+        "vol_above_200000": "Very large institution: multi-tower complex, township, large campus, or major hospital.",
     },
     "light_industry": {
-        "vol_800": "Small workshop or storage shed with 5–15 workers, 1 washroom, and minimal process water.",
-        "vol_2000": "Small factory or warehouse with 15–40 workers, 2 washrooms, basic canteen, occasional floor washing, or small construction site.",
-        "vol_5000": "Mid-size factory or active site with 40–100 workers, full canteen, daily floor/equipment wash-down, or light process water.",
-        "vol_10000": "Large factory or major construction site with 100–200 workers, full canteen and washrooms, significant wash-down or process water.",
-        "vol_50000": "Mid-size industrial unit with 200–800 workers, production-line water, cooling, washing, batching, warehouse wash, or major construction.",
-        "vol_200000": "Large industrial unit with 800+ workers, continuous-flow production water, cooling towers, wash-down, or large construction site.",
-        "vol_above_200000": "Industrial estate, major process plant, or very large infrastructure construction project.",
+        "vol_800": "Small workshop or storage shed with 5–15 workers and minimal process water.",
+        "vol_2000": "Small factory or warehouse with 15–40 workers, basic canteen, and occasional washing.",
+        "vol_5000": "Mid-size factory or active site with canteen, wash-down, or light process water.",
+        "vol_10000": "Large factory or major construction site with significant wash-down or process water.",
+        "vol_50000": "Mid-size industrial unit with production-line water, cooling, washing, or batching.",
+        "vol_200000": "Large industrial unit with continuous-flow production water, cooling towers, or wash-down.",
+        "vol_above_200000": "Industrial estate, major process plant, or very large infrastructure project.",
     },
 }
 
 DEST_OPTIONS = [
     ("overhead_tank", "Overhead tank"),
     ("ground_sump", "Ground-level storage tank or sump"),
-    ("direct_pipes", "Direct to building pipes (no tank)"),
+    ("direct_pipes", "Direct to building pipes"),
     ("irrigation", "Irrigation lines / open field / livestock"),
     ("industrial_process", "Industrial process or treatment system"),
     ("tanker", "Tanker or external transfer point"),
@@ -289,9 +307,9 @@ C2_OPTIONS = [
 ]
 
 C3_OPTIONS = [
-    ("shallow_under_30ft", "Shallow open well (under 30 ft)"),
-    ("medium_30_60ft", "Medium (30–60 ft)"),
-    ("deep_above_60ft", "Deep open well (above 60 ft)"),
+    ("shallow_under_30ft", "Shallow open well"),
+    ("medium_30_60ft", "Medium open well"),
+    ("deep_above_60ft", "Deep open well"),
 ]
 
 C4_OPTIONS = [
@@ -325,14 +343,14 @@ C7_OPTIONS = [
 ]
 
 C8_OPTIONS = [
-    ("moderate", "Moderate (2–6 hours/day)"),
-    ("heavy", "Heavy (6–12 hours/day)"),
-    ("continuous", "Continuous (12+ hours/day)"),
+    ("moderate", "Moderate"),
+    ("heavy", "Heavy"),
+    ("continuous", "Continuous"),
 ]
 
 C9_BAND_OPTIONS = [
-    ("single_low_under_200", "Below 200 V (Low Voltage)"),
-    ("single_normal_200_240", "200–240 V (Normal Voltage)"),
+    ("single_low_under_200", "Below 200 V"),
+    ("single_normal_200_240", "200–240 V"),
 ]
 
 THREE_MIN_OPTIONS = [(v, f"{v} V") for v in [340, 350, 360, 370, 380, 390, 400, 410]]
@@ -342,38 +360,38 @@ FARM_SINGLE_MAX_OPTIONS = [(v, f"{v} V") for v in [190, 200, 210, 220, 230, 240]
 
 C5A_BY_SETTING = {
     "home": [
-        ("home_standard", "Standard fittings — taps, showers, WCs, kitchen"),
-        ("home_premium", "Premium fittings — rain shower, body jets, or large overhead shower"),
+        ("home_standard", "Standard fittings"),
+        ("home_premium", "Premium fittings"),
     ],
     "shop_small_comm": [
-        ("shop_standard", "Standard fittings — taps, WCs, pantry, basic washrooms"),
-        ("shop_premium", "Premium fittings — salon, spa, boutique-hotel showers, or clinic rinse points"),
+        ("shop_standard", "Standard fittings"),
+        ("shop_premium", "Premium fittings"),
     ],
     "large_commercial": [
-        ("large_comm_standard", "Standard fittings only — taps, WCs, pantries"),
-        ("large_comm_premium", "Premium guest-room, spa, or pool-deck fittings"),
+        ("large_comm_standard", "Standard fittings only"),
+        ("large_comm_premium", "Premium guest-room / spa / pool fittings"),
     ],
     "farm": [
-        ("farm_flood", "Flood, furrow, or hand-watering only"),
+        ("farm_flood", "Flood, furrow, or hand-watering"),
         ("farm_drip", "Drip irrigation or livestock troughs"),
         ("farm_sprinkler", "Sprinklers or general wash-down"),
         ("farm_rain_gun", "Rain guns or high-pressure sprinklers"),
     ],
     "light_industry": [
-        ("industry_standard", "Standard washroom and canteen use only"),
+        ("industry_standard", "Washroom and canteen only"),
         ("industry_light_wash", "Light wash-down"),
         ("industry_routine_wash", "Routine production wash"),
-        ("industry_heavy_jetting", "Heavy wash-down or high-pressure jetting"),
+        ("industry_heavy_jetting", "Heavy wash-down or jetting"),
     ],
 }
 
 OPTION_DESCRIPTIONS = {
     "setting": {
-        "home": "Any residence — independent house, villa, flat, farmhouse.",
-        "farm": "Irrigation, crop watering, livestock, agricultural property.",
-        "shop_small_comm": "Showrooms, small offices, clinics, restaurants, small retail.",
-        "large_commercial": "Hotels, hospitals, schools, hostels, apartment blocks, colleges.",
-        "light_industry": "Factories, warehouses, construction projects, light manufacturing.",
+        "home": "Any residence — independent house, villa, flat, or farmhouse.",
+        "farm": "Irrigation, crop watering, livestock, or agricultural property.",
+        "shop_small_comm": "Showrooms, small offices, clinics, restaurants, or small retail.",
+        "large_commercial": "Hotels, hospitals, schools, hostels, apartment blocks, or colleges.",
+        "light_industry": "Factories, warehouses, construction projects, or light manufacturing.",
     },
     "job": {
         "lift_and_store": "Pull water from a source and fill a tank for later use.",
@@ -384,12 +402,12 @@ OPTION_DESCRIPTIONS = {
     },
     "source": {
         "borewell": "Deep underground source with a narrow casing pipe.",
-        "open_well": "Open water body, typically shallow, accessible from the top.",
+        "open_well": "Open water body, typically shallow and accessible from the top.",
         "underground_sump": "Ground-level or below-ground storage filled by tanker, municipal line, or other source.",
         "overhead_tank": "Tank already at height; water needs pressure rather than lifting.",
         "municipal": "Direct connection from city water supply.",
         "sewage_pit": "Collection point for waste water, sewage, or storm drainage.",
-        "open_ground": "Surface water sources used mainly for irrigation.",
+        "open_ground": "Canal, river, pond, or farm channel used mainly for irrigation.",
     },
     "lift": {
         "ground": "Same level, ground floor only, or pressure-only requirement.",
@@ -420,7 +438,7 @@ OPTION_DESCRIPTIONS = {
         "casing_12in_plus": "Industrial or municipal borewells.",
     },
     "c2_depth": {
-        "under_50ft": "Water level close to ground level, high-water-table areas.",
+        "under_50ft": "Water level close to ground level.",
         "50_100ft": "Shallow borewell, common for many domestic sites.",
         "100_200ft": "Typical domestic borewell depth.",
         "200_300ft": "Deeper domestic borewell, often in drier areas.",
@@ -431,15 +449,15 @@ OPTION_DESCRIPTIONS = {
         "above_1000ft": "Industrial, large agricultural, or special-case borewell.",
     },
     "c3_well_depth": {
-        "shallow_under_30ft": "Most domestic open wells in high-water-table regions.",
-        "medium_30_60ft": "Typical open wells in many parts of India.",
-        "deep_above_60ft": "Older or rural open wells in dry regions.",
+        "shallow_under_30ft": "Under 30 ft. Most domestic open wells in high-water-table regions.",
+        "medium_30_60ft": "30–60 ft. Typical open wells in many parts of India.",
+        "deep_above_60ft": "Above 60 ft. Older or rural open wells in dry regions.",
     },
     "c4_outlets": {
         "1_4": "Single bathroom or kitchen booster.",
         "5_12": "Small home with 2–3 bathrooms.",
         "13_20": "Large home or small commercial premises.",
-        "21_35": "Large home with multiple suites, small hotel floor, or clinic.",
+        "21_35": "Large home with suites, small hotel floor, or clinic.",
         "36_75": "Mid-size hotel, small hostel, or office floor.",
         "76_150": "Large hotel, apartment block, or institution.",
         "above_150": "Large complex, multi-tower project, or campus.",
@@ -459,7 +477,7 @@ OPTION_DESCRIPTIONS = {
         "large_comm_premium": "Hotel suites, spa areas, pool-deck hose, rain showers, or body jets.",
         "farm_flood": "Flood, furrow, or hand-watering only.",
         "farm_drip": "Drip irrigation or livestock troughs.",
-        "farm_sprinkler": "Sprinklers or general wash-down for fields, sheds, or dairy parlour.",
+        "farm_sprinkler": "Sprinklers or wash-down for fields, sheds, or dairy parlour.",
         "farm_rain_gun": "Rain guns or high-pressure sprinklers.",
         "industry_standard": "Washroom and canteen use only.",
         "industry_light_wash": "Floors, equipment, and general housekeeping.",
@@ -511,6 +529,7 @@ FIELD_ORDER = [
 ]
 
 PRESSURE_JOBS = {"boost_pressure", "lift_and_pressurise_directly"}
+IGNORED_INCOMPLETE_RULE_IDS = {61, 74, 76}
 
 
 # ---------------------------------------------------------------------------
@@ -569,11 +588,33 @@ def option_description(field: str, option_id) -> str:
     return OPTION_DESCRIPTIONS.get(field, {}).get(option_id, "")
 
 
+def disabled_reason_for_candidate(field: str, candidate_value, ans: dict):
+    test = dict(ans)
+    test[field] = candidate_value
+
+    existing_hard = {
+        rule_id
+        for rule_id, severity, _ in evaluate(ans)
+        if severity == "hard" and rule_id not in IGNORED_INCOMPLETE_RULE_IDS
+    }
+
+    for rule_id, severity, reason in evaluate(test):
+        if severity != "hard":
+            continue
+        if rule_id in IGNORED_INCOMPLETE_RULE_IDS:
+            continue
+        if rule_id not in existing_hard:
+            return reason
+
+    return None
+
+
 def render_option(field: str, opt, ans: dict, force_disabled_reason: str | None = None):
     oid, label = opt[0], opt[1]
     payload = opt[2] if len(opt) > 2 else None
 
-    disabled, reason = is_disabled(field, oid, ans)
+    reason = disabled_reason_for_candidate(field, oid, ans)
+    disabled = reason is not None
 
     if force_disabled_reason:
         disabled = True
@@ -1095,10 +1136,10 @@ def main():
             )
             render_question(
                 "Additional detail",
-                "Borewell water depth (static rest level)",
+                "Borewell water depth",
                 "c2_depth",
                 C2_OPTIONS,
-                "Depth to top of water column when the pump is off — not drilled depth.",
+                "Static rest level — depth to the top of water when the pump is off.",
             )
 
         ans = current_answers()
@@ -1132,7 +1173,7 @@ def main():
                     "Fixture / application pressure class",
                     "c5a_pressure",
                     C5A_BY_SETTING[ans["setting"]],
-                    "C5a adds pressure head; for small homes with premium fittings it also applies a flow floor.",
+                    "C5a adds pressure head. For small homes with premium fittings, it also applies a flow floor.",
                 )
 
         ans = current_answers()
@@ -1157,9 +1198,10 @@ def main():
             if needs_phase_confirm(ans):
                 render_question(
                     "Additional detail",
-                    f"Power supply phase (default: {default_phase(ans['setting'])}-phase)",
+                    f"Power supply phase",
                     "c7_phase",
                     C7_OPTIONS,
+                    f"Default for this setting: {default_phase(ans['setting'])}-phase.",
                 )
             elif "c7_phase" not in ans:
                 set_answer("c7_phase", default_phase(ans["setting"]))
@@ -1169,7 +1211,7 @@ def main():
         if ans.get("setting") and ans.get("demand") and c8_triggered(ans):
             render_question(
                 "Additional detail",
-                "Duty cycle (hours per day)",
+                "Duty cycle",
                 "c8_duty",
                 C8_OPTIONS,
             )
