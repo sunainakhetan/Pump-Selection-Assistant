@@ -15,6 +15,7 @@ LIFT_ORDER = [
 ]
 
 PRESSURE_JOBS = {"boost_pressure", "lift_and_pressurise_directly"}
+BELOW_GRADE_SOURCES = {"borewell", "open_well", "underground_sump"}
 
 
 def _lift_idx(v):
@@ -134,13 +135,23 @@ def r18(a):
 
 # C/D/E/F/G/H/I/J/K ---------------------------------------------------------
 def r19(a):
-    if a.get("job") == "lift_and_store" and a.get("lift") == "ground":
-        return ("hard", "A lift job requires elevation change.")
+    if (
+        a.get("job") == "lift_and_store"
+        and a.get("lift") == "ground"
+        and a.get("source")
+        and a.get("source") not in BELOW_GRADE_SOURCES
+    ):
+        return ("hard", "A ground-floor lift-and-store path is valid only when the source is below grade (borewell, open well, or underground sump).")
 
 
 def r20(a):
-    if a.get("job") == "lift_and_pressurise_directly" and a.get("lift") == "ground":
-        return ("hard", "A lift job requires elevation change.")
+    if (
+        a.get("job") == "lift_and_pressurise_directly"
+        and a.get("lift") == "ground"
+        and a.get("source")
+        and a.get("source") not in BELOW_GRADE_SOURCES
+    ):
+        return ("hard", "A ground-floor lift-and-pressurise path is valid only when the source is below grade (borewell, open well, or underground sump).")
 
 
 def r21(a):
@@ -184,15 +195,15 @@ def r28(a):
 
 
 def r29(a):
-    if a.get("source") == "borewell" and a.get("lift") == "ground":
-        return ("hard", "Borewell water must be lifted at least to the surface.")
+    # Valid in Framework v0.6: C2 carries the below-ground borewell lift;
+    # Lift = ground means no above-ground floors to climb.
+    return None
 
 
 def r30(a):
-    if a.get("source") == "open_well" and a.get("lift") == "ground" and a.get("job") in {
-        "lift_and_store", "lift_and_pressurise_directly"
-    }:
-        return ("hard", "A lifting job from an open well needs elevation change.")
+    # Valid in Framework v0.6: C3 carries the below-ground open-well lift;
+    # Lift = ground means no above-ground floors to climb.
+    return None
 
 
 def r31(a):
@@ -201,8 +212,9 @@ def r31(a):
 
 
 def r32(a):
-    if a.get("source") == "underground_sump" and a.get("lift") == "ground" and a.get("job") == "lift_and_store":
-        return ("hard", "Lift and store from a sump implies lifting to higher storage.")
+    # Valid in Framework v0.6: the fixed sump-lift allowance carries the
+    # below-grade portion. Rule #26 still blocks sump-to-sump at the same level.
+    return None
 
 
 def r33(a):
