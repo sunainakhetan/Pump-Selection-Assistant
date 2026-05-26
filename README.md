@@ -1,27 +1,75 @@
 # Pump Selection Assistant
 
-A free, web-based pump-selection tool. Customers answer a short questionnaire and get the top 5 best-matching pumps from a 4,020-SKU catalogue stored in an Excel file.
+A free, web-based pump-selection tool. Customers answer a short questionnaire and get ranked pump recommendations from the current 4,056-row master catalogue stored in an Excel file.
 
-The catalogue (`FINAL_MASTER_DATASHEET_final.xlsx`) is the single source of truth. To update the pumps, edit the Excel file — the app picks up the changes automatically.
+The catalogue is the single source of truth for SKUs. The app looks for `FINAL_MASTER_DATASHEET_final.xlsx` first. If you keep the uploaded spreadsheet name, it can also fall back to `MASTER DATASHEET_final_final copy(7).xlsx`.
+
+This build is aligned to the revised Framework v0.6 and the revised Filtering and Scoring mechanism.
 
 ## What you get
 
-- Clean, step-by-step questionnaire (5 core questions + conditionals shown only when needed)
-- Live invalidity enforcement: impossible answer combinations are greyed out with an explanation
-- A transparent **requirement vector** built from the answers, shown in a collapsible panel
-- Twelve-step filter pipeline + midpoint scoring (60 head + 40 flow + bonuses − penalties)
-- Polished recommendation cards with score, head/flow ranges, HP, phase, and any warning flags
-- All 4,020 SKUs come from the Excel — nothing is hard-coded
+- Clean, step-by-step questionnaire with Setting asked first, followed by Job, Source, Lift, setting-specific Demand, and triggered conditional questions.
+- Live invalidity enforcement: impossible answer combinations are greyed out with an explanation.
+- Soft warnings for unusual but still allowed combinations.
+- A transparent **requirement vector** built from the answers, shown in a collapsible panel.
+- Framework v0.6 filtering and scoring using head, flow, phase, voltage, pump type, borewell diameter, suction lift, sewage/water-quality logic, and relevant type-specific filters.
+- C5a fixture/application pressure handling for pressure jobs.
+- C7 default-then-confirm phase logic.
+- Always-triggered C9 voltage handling, with the correct C9 question shape based on Setting and final phase.
+- Polished recommendation cards with score, head/flow ranges, HP, phase, voltage data, borewell diameter, pressure/tank/control fields where available, and warning flags.
+- Catalogue-driven results — SKUs are read from Excel, not hard-coded into the app.
+
+## What changed in this updated build
+
+This update keeps the old README structure but updates the app behaviour to the new documents.
+
+- Updated the customer journey to match Framework v0.6:
+  - Setting → Job → Source → Lift → Demand → triggered conditional factors.
+- Replaced the old generic demand labels with setting-specific demand bands.
+- Updated the internal demand mapping:
+  - representative daily volume,
+  - default run-time,
+  - minimum flow,
+  - typical flow.
+- Added **C5a — Fixture / Application Pressure Class** for pressure jobs.
+- C5a now contributes head add-ons by setting/application.
+- Home premium fixtures with 1–4 or 5–12 outlets also apply the 3,000 / 3,500 LPH flow floor.
+- Replaced the older voltage logic with the revised C9 model:
+  - Home / small-commercial single-phase: two-band voltage picker.
+  - Farm single-phase: Min V / Max V range.
+  - Three-phase variants: Min V / Max V range.
+- Updated C7 phase logic:
+  - Setting-based default phase.
+  - Confirmation/override only when the framework requires it.
+- Updated borewell casing/V-code handling, including additional V-codes present in the current catalogue.
+- Updated C2 borewell depth and C3 open-well depth head add-ons.
+- Updated ground-floor lift handling for below-grade sources:
+  - Borewell + ground-floor lift is valid; C2 depth carries the below-ground lift.
+  - Open well + ground-floor lift is valid; C3 depth carries the below-ground lift.
+  - Underground sump + ground-floor lift is valid; the app adds the fixed sump-lift allowance.
+- Added the underground-sump fixed head allowance:
+  - +8 m to required minimum head.
+  - +12 m to typical head.
+- Updated source-to-pump-type mappings:
+  - Underground sump/storage can feed Self-Priming, Openwell, Pressure Booster, or Hydropneumatic candidates depending on job type.
+  - Municipal direct supply maps to Pressure Booster / Hydropneumatic candidates.
+  - Sewage/drainage pit maps to Sewage Pump candidates.
+- Added the Self-Priming RPM speed split for water-quality handling.
+- Updated `_verify.py` to validate the revised worked example and the relaxed below-grade ground-floor lift cases.
 
 ## Files
 
-```
+```text
 app.py                              — Streamlit UI
-vector.py                           — builds the requirement vector
-rules.py                            — 74 invalidity rules from the framework doc
-scoring.py                          — 12-step filter pipeline + midpoint scoring
+style.css                           — UI styling
+vector.py                           — builds the requirement vector from customer answers
+rules.py                            — Framework v0.6 invalidity and warning rules
+scoring.py                          — filtering pipeline + scoring
+_verify.py                          — verification script for the revised worked example
 requirements.txt                    — Python dependencies
-FINAL_MASTER_DATASHEET_final.xlsx   — pump catalogue (editable)
+FINAL_MASTER_DATASHEET_final.xlsx   — pump catalogue, editable source of SKUs
+config.toml                         — Streamlit theme config copy
+.streamlit/config.toml              — Streamlit Cloud theme config location
 ```
 
 ## Running it locally
@@ -31,114 +79,139 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The app opens at `http://localhost:8501`.
+The app opens at:
+
+```text
+http://localhost:8501
+```
 
 ## Deploying to Streamlit Community Cloud (free)
 
-1. **Create a GitHub repo** and upload all four `.py` files, `requirements.txt`, and the Excel file. (You can drag-and-drop the files onto the repo page in your browser — no Git command line needed.)
-2. **Go to** [share.streamlit.io](https://share.streamlit.io) and sign in with your GitHub account.
-3. Click **"New app"**, pick your repo, set the main file to `app.py`, and click **Deploy**.
-4. After ~2 minutes, you get a public URL like `https://your-pump-assistant.streamlit.app`.
+1. **Create a GitHub repo** and upload the project files:
+   - `app.py`
+   - `vector.py`
+   - `rules.py`
+   - `scoring.py`
+   - `style.css`
+   - `_verify.py`
+   - `requirements.txt`
+   - `.streamlit/config.toml`
+   - the Excel catalogue file
+2. Keep the Excel catalogue named `FINAL_MASTER_DATASHEET_final.xlsx` for the cleanest deployment. The app can also fall back to `MASTER DATASHEET_final_final copy(7).xlsx` if that is the file name you upload.
+3. Go to Streamlit Community Cloud and sign in with your GitHub account.
+4. Click **New app**.
+5. Pick your repo.
+6. Set the main file to:
+
+```text
+app.py
+```
+
+7. Click **Deploy**.
+8. After a short build, Streamlit gives you a public URL similar to:
+
+```text
+https://your-pump-assistant.streamlit.app
+```
 
 ## Updating the catalogue
 
 This is the daily workflow once the app is deployed:
 
 1. Open `FINAL_MASTER_DATASHEET_final.xlsx` in Excel on your computer.
-2. Edit. Save.
-3. On your GitHub repo page, drag-and-drop the updated file to replace the old one. GitHub asks for a short commit message — anything is fine.
-4. Streamlit Cloud detects the change and redeploys in about 30 seconds.
-5. The next visitor to the app sees the updated catalogue.
+2. Edit the catalogue.
+3. Save the file.
+4. On your GitHub repo page, drag-and-drop the updated file to replace the old one.
+5. GitHub asks for a short commit message — anything is fine.
+6. Streamlit Cloud detects the change and redeploys automatically.
+7. The next visitor to the app sees the updated catalogue.
 
-The app uses `@st.cache_data` keyed on the Excel file's modification time, so when the file changes the cache is invalidated automatically.
+The app uses `@st.cache_data` keyed on the Excel file's modification time, so when the Excel file changes, the cache is invalidated automatically.
 
 ## Who can use the app
 
-By default, the Streamlit Cloud URL is **public**. Anyone with the link can use the app.
+By default, a Streamlit Community Cloud app URL is **public**. Anyone with the link can use the app.
 
-- **Just you?** Don't share the link.
+- **Just you?** Do not share the link.
 - **Your office team?** Send them the link.
-- **The general public?** Just publish the link on your website.
+- **The general public?** Publish the link on your website or marketing material.
 
-If you ever need a private app with login, Streamlit Cloud's free plan also supports gating the app to specific GitHub users — see Streamlit's docs.
+If you need a private app with login, Streamlit Community Cloud supports access control through GitHub-based permissions. Use Streamlit's current access-control settings for that.
 
 ## Verifying it works
 
-The filtering document contains a fully worked example in sections 9-15. Enter these answers to reproduce it:
+The revised filtering/scoring document contains a fully worked example using the current 4,056-row catalogue. You can reproduce it through `_verify.py`.
 
-- Job: Boost pressure from existing storage or supply
-- Source: Overhead tank
-- Lift: 3rd floor
-- Demand: Medium
-- Setting: Home
-- Outlets: 5-12 outlets
-- Usage: Moderate
-- Phase: Single-phase
-- Voltage: Normal voltage (200-240 V)
+Run:
 
-The app uses the representative outlet count for each outlet band. For the 5-12 outlets band, the representative count is 8.
+```bash
+python _verify.py
+```
 
-For this example, the requirement vector should use:
+Expected highlights:
 
-- Required minimum head: 12 m
-- Typical head: 18 m
-- Required minimum flow: 2,500 LPH
-- Typical flow: 3,500 LPH
-- Allowed phase: Single or Both
-- Preferred HP cap: 3 HP, with a hard cap at 6 HP
+- Catalogue rows loaded: 4,056.
+- Rows with usable Min/Max Head and Min/Max Flow: 4,025.
+- Survivors after filtering: 114.
+- The top five recommendations should be:
 
-You should see 101 surviving SKUs after filtering. The top five should be:
+```text
+1. CRI Pumps CRI4R-2N/3/35       — score 99
+2. Kirloskar Brothers 80HHN-2024 — score 99
+3. CRI Pumps CRI4R-2/3/40        — score 98
+4. CRI Pumps CRI4R-2N/3/32       — score 98
+5. CRI Pumps CRI4R-3E/5/40       — score 98
+```
 
-1. Shakti SH4-3 — score 96
-2. Shakti SHI4-3 — score 96
-3. Shakti SHN4-3 — score 96
-4. Kirloskar Brothers CPBS-62824H / V — score 94
-5. Lubi MH 1A — score 93
+The same worked-example path is:
 
-You can also run `_verify.py` to print the requirement vector, filter trace, and top-five table from the Excel catalogue.
+```text
+Setting: Large commercial or institutional
+Job: Lift and store
+Source: Borewell
+Lift: 11–15 floors
+Demand: ~10,000–50,000 L/day — mid-size institutional premises
+Destination: Overhead tank
+Borewell casing: 6 inch
+Borewell water depth: 200–300 ft
+Power phase: Three-phase
+Duty cycle: Heavy
+Voltage Min V: 380 V
+Voltage Max V: 430 V
+```
+
+For this example, the requirement vector should use approximately:
+
+```text
+Allowed pump types: Borewell Pump
+Required minimum head: 135 m
+Typical head: 145 m
+Required minimum flow: 8,000 LPH
+Typical flow: 12,000 LPH
+Allowed phase: Three or Both
+Voltage envelope: 380–430 V, three-phase
+Preferred HP cap: none for Large commercial
+```
+
+The verification script also checks the revised below-grade ground-floor lift behaviour:
+
+- Borewell → ground-floor lift-and-store is valid.
+- Underground sump → ground-floor lift-and-pressurise is valid.
+- Underground sump adds +8 m required head and +12 m typical head.
+- Underground-sump pressure jobs can include Pressure Booster candidates.
 
 ## Source of truth
 
-- **Catalogue rows**: `FINAL_MASTER_DATASHEET_final.xlsx`, sheet `Master Data`.
-- **Rules, mappings, filters, scoring**: the two Word documents (`Pump_UseCase_Framework___mapping_tables_FINAL.docx`, `FILTERING_AND_SCORING_MECHANISM_FINAL.docx`). All numbers in `vector.py`, `rules.py`, and `scoring.py` come from those documents — nothing is invented.
+- **Catalogue rows:** `FINAL_MASTER_DATASHEET_final.xlsx`, sheet `Master Data`.
+- **Framework:** `Pump_UseCase_Framework_v0_6_integrated_updates-3.docx`.
+- **Filtering and scoring:** `Filtering_and_Scoring_Mechanism_revised-3.docx`.
+- **Code implementation:** `vector.py`, `rules.py`, and `scoring.py`.
 
-If a rule or threshold needs to change, update the relevant constant in `vector.py` or `rules.py` and the doc, then redeploy.
+If a rule, threshold, mapping, or filter needs to change, update the relevant document and the corresponding constant or function in the code, then redeploy.
 
-# Pump Selection Assistant — Framework v0.6 build
+## Notes and caveats
 
-A Streamlit pump-selection assistant updated to the revised framework, calculation mechanism, and current 4,056-row master datasheet.
-
-## What changed in this build
-
-- Customer journey now starts with **Setting**, followed by Job, Source, Lift, setting-specific Demand, and triggered conditional factors.
-- Demand now uses setting-specific customer-facing bands mapped internally to representative daily volume, default run-time, minimum flow, and typical flow.
-- Added **C5a — Fixture / Application Pressure Class** as a required pressure-job conditional factor.
-- C5a adds head to both minimum and typical head; Home premium fixtures with 1–4 or 5–12 outlets also apply the 3,000 / 3,500 LPH flow floor.
-- Replaced the old voltage logic with the revised always-triggered **C9** model:
-  - Home / small-commercial single-phase: two-band picker.
-  - Farm single-phase: Min V / Max V range.
-  - Three-phase variants: Min V / Max V range.
-- Updated C1 borewell V-code eligibility, including V2.5 as 4-inch class and V3 fitment flags.
-- Added C6 Self-Priming speed/RPM handling for clean and lightly-soiled water.
-- Updated verification to the new worked example: Large-commercial borewell, 11–15 floors, 6-inch casing, 200–300 ft, Heavy duty, three-phase 380–430 V.
-- Preserved the original visual style: hero shell, cyan/white palette, card grid, sticky side panel, recommendation cards, and status/metric cards.
-
-## Files
-
-```text
-app.py                              — Streamlit UI with retained visual system
-style.css                           — original UI styling, separated for readability
-vector.py                           — Framework v0.6 answer-to-vector mapping
-rules.py                            — v0.6 invalidity rules / UI disabling logic
-scoring.py                          — v0.6 filter pipeline and scoring
-_verify.py                          — worked-example verification
-requirements.txt                    — dependencies
-FINAL_MASTER_DATASHEET_final.xlsx   — updated master datasheet
-config.toml                         — Streamlit theme
-
-run locally
-pip install -r requirements.txt
-streamlit run app.py
-
-verify the worked example
-python _verify.py
+- The scoring method uses catalogue Min/Max Head and Min/Max Flow ranges. It does not use full manufacturer pump curves.
+- If true pump curves become available later, curve-based selection should replace midpoint scoring.
+- Row counts and top-five results are tied to the current master sheet. If the catalogue changes, rerun `_verify.py` and update this README's expected counts if needed.
+- Some catalogue rows may have missing voltage, phase, speed, pressure, or tank/control data. The matching engine handles these according to the revised rules and fallback logic.
