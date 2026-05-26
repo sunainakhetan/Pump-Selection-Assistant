@@ -34,7 +34,12 @@ SOURCE_TYPES = {
         "suction_required": 6,
     },
     "underground_sump": {
-        "types": ["Self-Priming Pump", "Openwell Pump", "Hydropneumatic Pump"],
+        "types": [
+            "Self-Priming Pump",
+            "Openwell Pump",
+            "Pressure Booster Pump",
+            "Hydropneumatic Pump",
+        ],
         "suction_required": 6,
     },
     "overhead_tank": {
@@ -42,12 +47,12 @@ SOURCE_TYPES = {
         "suction_required": 0,
     },
     "municipal": {
-        "types": ["Self-Priming Pump", "Pressure Booster Pump", "Hydropneumatic Pump"],
-        "suction_required": 3,
+        "types": ["Pressure Booster Pump", "Hydropneumatic Pump"],
+        "suction_required": None,
     },
     "sewage_pit": {
-        "types": ["Self-Priming Pump", "Sewage Pump"],
-        "suction_required": 3,
+        "types": ["Sewage Pump"],
+        "suction_required": None,
     },
     "open_ground": {
         "types": ["Openwell Pump", "Self-Priming Pump"],
@@ -137,6 +142,11 @@ C3_HEAD_ADD = {
     "medium_30_60ft": (18, ["Openwell Pump", "Self-Priming Pump"]),
     "deep_above_60ft": (25, ["Openwell Pump", "Borewell Pump"]),
 }
+
+# Underground sump/storage has no measured C2/C3 source-depth answer, but it
+# still sits below floor level. The framework therefore adds a fixed shallow
+# below-grade allowance when Source = underground sump/storage.
+SUMP_LIFT_HEAD_ADD = (8, 12)  # (required minimum head, typical head)
 
 C5A_HEAD_ADD = {
     "home_standard": 0,
@@ -278,19 +288,31 @@ def build_vector(ans: dict) -> dict:
         allowed_types = [] if rule["out_of_scope"] else _intersect(allowed_types, rule["types"])
 
     lift_min, lift_typ = LIFT_HEAD[ans["lift"]]
-    head_add = 0
+    head_add_min = 0
+    head_add_typ = 0
 
     if ans.get("c2_depth"):
-        head_add += C2_HEAD_ADD[ans["c2_depth"]]
+        add = C2_HEAD_ADD[ans["c2_depth"]]
+        head_add_min += add
+        head_add_typ += add
 
     if ans.get("c3_well_depth"):
-        head_add += C3_HEAD_ADD[ans["c3_well_depth"]][0]
+        add = C3_HEAD_ADD[ans["c3_well_depth"]][0]
+        head_add_min += add
+        head_add_typ += add
+
+    if ans.get("source") == "underground_sump":
+        sump_min, sump_typ = SUMP_LIFT_HEAD_ADD
+        head_add_min += sump_min
+        head_add_typ += sump_typ
 
     if ans.get("c5a_pressure"):
-        head_add += C5A_HEAD_ADD[ans["c5a_pressure"]]
+        add = C5A_HEAD_ADD[ans["c5a_pressure"]]
+        head_add_min += add
+        head_add_typ += add
 
-    required_min_head = lift_min + head_add
-    typical_head = lift_typ + head_add
+    required_min_head = lift_min + head_add_min
+    typical_head = lift_typ + head_add_typ
 
     rep_daily, default_hours, demand_min_flow, demand_typ_flow = DEMAND_FLOW[ans["demand"]]
     run_hours = C8_HOURS[ans["c8_duty"]] if ans.get("c8_duty") else default_hours
