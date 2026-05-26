@@ -30,7 +30,18 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).parent
-EXCEL_PATH = BASE_DIR / "FINAL_MASTER_DATASHEET_final.xlsx"
+CATALOGUE_CANDIDATES = [
+    BASE_DIR / "FINAL_MASTER_DATASHEET_final.xlsx",
+    BASE_DIR / "MASTER DATASHEET_final_final copy(7).xlsx",
+]
+
+
+def resolve_catalogue_path() -> Path:
+    for path in CATALOGUE_CANDIDATES:
+        if path.exists():
+            return path
+    # Fall back to the canonical deployment name so the error message is useful.
+    return CATALOGUE_CANDIDATES[0]
 
 
 @st.cache_data(show_spinner=False)
@@ -39,8 +50,9 @@ def load_catalogue(path: str, mtime: float) -> pd.DataFrame:
 
 
 def get_catalogue() -> pd.DataFrame:
-    mtime = os.path.getmtime(EXCEL_PATH) if EXCEL_PATH.exists() else 0
-    return load_catalogue(str(EXCEL_PATH), mtime)
+    path = resolve_catalogue_path()
+    mtime = os.path.getmtime(path) if path.exists() else 0
+    return load_catalogue(str(path), mtime)
 
 
 css_path = BASE_DIR / "style.css"
@@ -424,7 +436,7 @@ OPTION_DESCRIPTIONS = {
         "open_ground": "Canal, river, pond, or farm channel used mainly for irrigation.",
     },
     "lift": {
-        "ground": "Same level, ground floor only, or pressure-only requirement.",
+        "ground": "Same level, ground floor only, pressure-only, or a below-grade source feeding a ground-floor destination; borewell/open-well/sump lift is carried by C2/C3/sump allowance.",
         "floor_1": "Water needs to reach the first floor.",
         "floor_2": "Water needs to reach the second floor.",
         "floor_3": "Water needs to reach the third floor.",
@@ -954,11 +966,24 @@ def build_spec_summary(row):
             " V",
         )
     )
+    pressure_range_box = spec_range(
+        "Pressure range",
+        row,
+        "Minimum Pressure (bar)",
+        "Maximum Pressure (bar)",
+        " bar",
+    )
+    if pressure_range_box:
+        boxes.append(pressure_range_box)
+    elif "Pressure Range (bar)" in row.index and is_real_value(row.get("Pressure Range (bar)")):
+        boxes.append(spec_item("Pressure range", f"{clean_value(row.get('Pressure Range (bar)'))} bar"))
 
     extra_columns = [
         ("Outlet size", "Outlet Size", ""),
         ("Suction lift", "Suction Lift (m)", " m"),
         ("Speed", "Speed (RPM)", " RPM"),
+        ("Tank size", "Tank Size", ""),
+        ("Control type", "Control Type", ""),
         ("Cutter type", "Cutter Type", ""),
         ("Cooling type", "Cooling Type", ""),
         ("Stage", "Stage", ""),
