@@ -147,6 +147,7 @@ h1, h2, h3 { color: var(--ink); letter-spacing:-.035em; }
   .option-grid, .metric-grid, .rec-card .specs { grid-template-columns:1fr; }
   .question-panel, .side-panel { border-radius:22px; padding:16px; }
 }
+
 /* Compact clickable option boxes */
 [class*="st-key-optwrap_"] .stButton > button {
   min-height: 104px !important;
