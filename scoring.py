@@ -1,301 +1,377 @@
 """
-scoring.py — v0.6 hard-filter pipeline and midpoint scoring.
+scoring.py — v1.1 hard-filter pipeline and midpoint ranking.
+
+The catalogue has Min/Max Head and Min/Max Flow ranges rather than full pump
+curves, so ranking uses the framework's midpoint approximation: hydraulic fit
+first, then small penalties/tilts for HP, phase unknowns, suction uncertainty,
+voltage robustness, Self-Priming speed, and municipal-path conservatism.
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
+NA_STRINGS = {"", "n/a", "na", "nan", "none", "not found", "not_found", "-", "--", "n.a.", "not available"}
 
-def _num(s):
+
+def _series(index, dtype="object"):
+    return pd.Series(index=index, dtype=dtype)
+
+
+def _num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-def _norm_str(s):
-    return s.astype("string").str.strip()
+def _norm_str(s: pd.Series) -> pd.Series:
+    out = s.astype("string").str.strip()
+    return out.mask(out.isna() | out.str.lower().isin(NA_STRINGS), pd.NA)
+
+
+def _norm_lower(s: pd.Series) -> pd.Series:
+    return _norm_str(s).str.lower()
+
+
+def _column(df: pd.DataFrame, name: str, dtype="object") -> pd.Series:
+    return df[name] if name in df.columns else _series(df.index, dtype=dtype)
+
+
+def _trace(trace, step, label, work):
+    trace.append({"step": step, "label": label, "rows_left": int(len(work))})
 
 
 def filter_skus(df: pd.DataFrame, vec: dict):
+    """Apply the ordered v1.1 hard filters and return (survivors, trace)."""
+
     trace = []
     work = df.copy()
     work["_cat_order"] = np.arange(len(work))
-    trace.append({"step": "—", "label": "Start with all catalogue SKUs", "rows_left": len(work)})
+    _trace(trace, "—", "Start with all catalogue SKUs", work)
 
-    for col in ["Min Head (m)", "Max Head (m)", "Min Flow (LPH)", "Max Flow (LPH)", "HP"]:
+    numeric_cols = [
+        "Min Head (m)",
+        "Max Head (m)",
+        "Min Flow (LPH)",
+        "Max Flow (LPH)",
+        "HP",
+        "Suction Lift (m)",
+        "Speed (RPM)",
+        "Single Phase Minimum Voltage",
+        "Single Phase Maximum Voltage",
+        "Three Phase Minimum Voltage",
+        "Three Phase Maximum Voltage",
+        "Minimum Pressure (bar)",
+        "Maximum Pressure (bar)",
+    ]
+    for col in numeric_cols:
         if col in work.columns:
             work[col] = _num(work[col])
-    work = work.dropna(subset=["Min Head (m)", "Max Head (m)", "Min Flow (LPH)", "Max Flow (LPH)"])
-    trace.append({"step": 1, "label": "Drop rows with non-numeric Min/Max Head or Min/Max Flow", "rows_left": len(work)})
 
-    if not vec["allowed_pump_types"] or vec["special"].get("out_of_scope"):
+    required_perf = ["Min Head (m)", "Max Head (m)", "Min Flow (LPH)", "Max Flow (LPH)"]
+    work = work.dropna(subset=[c for c in required_perf if c in work.columns])
+    _trace(trace, 1, "Drop rows with non-numeric Min/Max Head or Min/Max Flow", work)
+
+    allowed = vec.get("allowed_pump_types", [])
+    if not allowed or vec.get("special", {}).get("out_of_scope"):
         work = work.iloc[0:0]
-        trace.append({"step": 2, "label": "Out of normal catalogue scope", "rows_left": 0})
+        _trace(trace, 2, "Out of enabled v1.1 matrix scope", work)
         return work, trace
 
-    work = work[work["Type"].isin(vec["allowed_pump_types"])]
-    trace.append({"step": 2, "label": f"Keep only: {', '.join(vec['allowed_pump_types'])}", "rows_left": len(work)})
+    work = work[work["Type"].isin(allowed)]
+    _trace(trace, 2, f"Keep matrix-cell pump types: {', '.join(allowed)}", work)
 
-    work = work[work["Max Head (m)"] >= vec["required_min_head"]]
-    trace.append({"step": 3, "label": f"Max Head ≥ {vec['required_min_head']} m", "rows_left": len(work)})
+    req_head = float(vec.get("required_min_head", 0))
+    typ_head = float(vec.get("typical_head", 0))
+    req_flow = float(vec.get("required_min_flow", 0))
+    typ_flow = float(vec.get("typical_flow", 0))
 
-    work = work[work["Min Head (m)"] <= vec["typical_head"]]
-    trace.append({"step": 4, "label": f"Min Head ≤ {vec['typical_head']} m", "rows_left": len(work)})
+    work = work[work["Max Head (m)"] >= req_head]
+    _trace(trace, 3, f"Max Head ≥ {req_head:.2f} m", work)
 
-    work = work[work["Max Flow (LPH)"] >= vec["required_min_flow"]]
-    trace.append({"step": 5, "label": f"Max Flow ≥ {vec['required_min_flow']:.0f} LPH", "rows_left": len(work)})
+    work = work[work["Min Head (m)"] <= typ_head]
+    _trace(trace, 4, f"Min Head ≤ {typ_head:.2f} m", work)
 
-    work = work[work["Min Flow (LPH)"] <= vec["typical_flow"]]
-    trace.append({"step": 6, "label": f"Min Flow ≤ {vec['typical_flow']:.0f} LPH", "rows_left": len(work)})
+    work = work[work["Max Flow (LPH)"] >= req_flow]
+    _trace(trace, 5, f"Max Flow ≥ {req_flow:.0f} LPH", work)
 
-    # C1 borewell V-code filter.
-    if "borewell_vcodes" in vec["special"]:
-        codes = set(vec["special"]["borewell_vcodes"])
-        is_bw = work["Type"] == "Borewell Pump"
-        dia = _norm_str(work.get("Pump Diameter", pd.Series(index=work.index)))
-        keep = (~is_bw) | dia.isin(codes)
-        work = work[keep]
-        trace.append({"step": 8, "label": f"Borewell Pump Diameter ∈ {{{', '.join(vec['special']['borewell_vcodes'])}}}", "rows_left": len(work)})
+    work = work[work["Min Flow (LPH)"] <= typ_flow]
+    _trace(trace, 6, f"Min Flow ≤ {typ_flow:.0f} LPH", work)
 
-    phase = _norm_str(work.get("Phase", pd.Series(index=work.index, dtype="object")))
-    phase_norm = phase.mask(phase.isna() | phase.eq("") | phase.str.lower().isin(["not found", "nan"]), pd.NA)
-
-    # Revised fallback: borewell blank phase is treated as Three. Other blank rows
-    # are lower-confidence fallbacks.
+    # Phase filter. Blank/Not Found borewell is treated as Three by fallback;
+    # other blank phase rows are retained as lower-confidence fallbacks.
+    phase_norm = _norm_str(_column(work, "Phase"))
     borewell_blank = (work["Type"] == "Borewell Pump") & phase_norm.isna()
     phase_effective = phase_norm.mask(borewell_blank, "Three")
     work = work.assign(_phase_norm=phase_norm, _phase_effective=phase_effective)
 
-    keep_known = work["_phase_effective"].isin(vec["allowed_phase"])
+    allowed_phase = set(vec.get("allowed_phase", set()))
+    keep_known = work["_phase_effective"].isin(allowed_phase)
     keep_unknown = work["_phase_effective"].isna()
     work = work[keep_known | keep_unknown]
-    trace.append({
-        "step": 7,
-        "label": f"Phase ∈ {{{', '.join(sorted(vec['allowed_phase']))}}}; blank borewell treated as Three, other blank kept as fallback",
-        "rows_left": len(work),
-    })
+    _trace(
+        trace,
+        7,
+        f"Phase ∈ {{{', '.join(sorted(allowed_phase))}}}; blank borewell treated as Three; other blank retained as fallback",
+        work,
+    )
 
-    # C9 voltage filter.
-    variant = vec["special"].get("c9_variant")
+    # Corrected v1.1 voltage filter.
+    special = vec.get("special", {})
+    variant = special.get("c9_variant")
     if variant == "single_band":
-        vmin = _num(work.get("Single Phase Minimum Voltage", pd.Series(index=work.index)))
-        vmax = _num(work.get("Single Phase Maximum Voltage", pd.Series(index=work.index)))
-        band = vec["special"].get("c9_band")
-
+        vmin = _num(_column(work, "Single Phase Minimum Voltage"))
+        vmax = _num(_column(work, "Single Phase Maximum Voltage"))
+        band = special.get("c9_band")
         if band == "single_low_under_200":
             work = work[vmin.notna() & (vmin >= 180)]
-            label = "C9 Low band: Single Phase Min V ≥ 180; unknown excluded"
+            label = "C9 low-voltage single-phase: Single Phase Min V ≥ 180; unknown excluded"
         else:
             known_ok = vmin.notna() & (vmin >= 180)
             unknown = vmin.isna() | vmax.isna()
             work = work[known_ok | unknown]
-            label = "C9 Normal band: known Single Phase Min V ≥ 180; unknown retained with confirm flag"
-
-        trace.append({"step": "7a", "label": label, "rows_left": len(work)})
+            label = "C9 normal single-phase: known Single Phase Min V ≥ 180; unknown retained with confirm-voltage flag"
+        _trace(trace, "7a", label, work)
 
     elif variant == "farm_single_range":
-        mn, mx = vec["special"].get("c9_min_v"), vec["special"].get("c9_max_v")
-        vmin = _num(work.get("Single Phase Minimum Voltage", pd.Series(index=work.index)))
-        vmax = _num(work.get("Single Phase Maximum Voltage", pd.Series(index=work.index)))
-        work = work[vmin.notna() & vmax.notna() & (vmin >= mn) & (vmax <= mx)]
-        trace.append({
-            "step": "7a",
-            "label": f"C9 Farm single-phase envelope inside [{mn}, {mx}] V; unknown excluded",
-            "rows_left": len(work),
-        })
+        mn, mx = special.get("c9_min_v"), special.get("c9_max_v")
+        vmin = _num(_column(work, "Single Phase Minimum Voltage"))
+        vmax = _num(_column(work, "Single Phase Maximum Voltage"))
+        work = work[vmin.notna() & vmax.notna() & (vmin <= mn) & (vmax >= mx)]
+        _trace(trace, "7a", f"C9 Farm single-phase contain-test: pump min_v ≤ {mn} AND pump max_v ≥ {mx}; unknown excluded", work)
 
     elif variant == "three_phase_range":
-        mn, mx = vec["special"].get("c9_min_v"), vec["special"].get("c9_max_v")
-        vmin = _num(work.get("Three Phase Minimum Voltage", pd.Series(index=work.index)))
-        vmax = _num(work.get("Three Phase Maximum Voltage", pd.Series(index=work.index)))
-        work = work[vmin.notna() & vmax.notna() & (vmin >= mn) & (vmax <= mx)]
-        trace.append({
-            "step": "7a",
-            "label": f"C9 Three-phase envelope inside [{mn}, {mx}] V; unknown excluded",
-            "rows_left": len(work),
-        })
+        mn, mx = special.get("c9_min_v"), special.get("c9_max_v")
+        vmin = _num(_column(work, "Three Phase Minimum Voltage"))
+        vmax = _num(_column(work, "Three Phase Maximum Voltage"))
+        work = work[vmin.notna() & vmax.notna() & (vmin <= mn) & (vmax >= mx)]
+        _trace(trace, "7a", f"C9 Three-phase contain-test: pump min_v ≤ {mn} AND pump max_v ≥ {mx}; unknown excluded", work)
 
-    if "suction_lift_required" in vec["special"]:
-        req = vec["special"]["suction_lift_required"]
+    # C1 borewell V-code filter.
+    if "borewell_vcodes" in special:
+        codes = set(special["borewell_vcodes"])
+        dia = _norm_str(_column(work, "Pump Diameter"))
+        is_bw = work["Type"] == "Borewell Pump"
+        if "casing_12in_plus" in str(special.get("borewell_casing", "")):
+            keep_dia = dia.apply(_vcode_is_12_plus)
+        else:
+            keep_dia = dia.isin(codes)
+        work = work[(~is_bw) | keep_dia]
+        _trace(trace, 8, f"Borewell Pump Diameter ∈ {{{', '.join(special['borewell_vcodes'])}}}", work)
+
+    # Open-ground-water ≤ 7 m suction-lift rule.
+    if "suction_lift_required" in special:
+        req = float(special["suction_lift_required"])
         is_sp = work["Type"] == "Self-Priming Pump"
-        sl = _num(work.get("Suction Lift (m)", pd.Series(index=work.index)))
-        work = work[(~is_sp) | (sl >= req) | sl.isna()]
-        trace.append({
-            "step": 9,
-            "label": f"Self-Priming suction lift ≥ {req} m (unknown kept with penalty)",
-            "rows_left": len(work),
-        })
+        suction = _num(_column(work, "Suction Lift (m)"))
+        work = work[(~is_sp) | suction.isna() | (suction >= req)]
+        _trace(trace, 9, f"Self-Priming Suction Lift ≥ {req:.1f} m for open ground water ≤ 7 m; unknown kept with penalty", work)
 
-    if "self_priming_rpm_max" in vec["special"]:
-        limit = vec["special"]["self_priming_rpm_max"]
-        is_sp = work["Type"] == "Self-Priming Pump"
-        rpm = _num(work.get("Speed (RPM)", pd.Series(index=work.index)))
-        work = work[(~is_sp) | (rpm.notna() & (rpm < limit))]
-        trace.append({
-            "step": 10,
-            "label": f"Lightly soiled: keep Self-Priming Speed < {limit} RPM; unknown excluded",
-            "rows_left": len(work),
-        })
-
-    if "cutter_required" in vec["special"]:
-        req = vec["special"]["cutter_required"]
+    # Drain C6 cutter / non-cutter requirement.
+    if "cutter_required" in special:
+        req = str(special["cutter_required"]).lower().strip()
         is_sew = work["Type"] == "Sewage Pump"
-        cutter = _norm_str(work.get("Cutter Type", pd.Series(index=work.index))).str.lower()
-        work = work[(~is_sew) | (cutter == req.lower())]
-        trace.append({"step": 11, "label": f"Sewage Cutter Type = '{req}'", "rows_left": len(work)})
+        cutter = _norm_lower(_column(work, "Cutter Type"))
+        work = work[(~is_sew) | (cutter == req)]
+        _trace(trace, 10, f"Sewage Cutter Type = '{req}'", work)
 
-    if vec.get("hp_cap") is not None:
-        cap = vec["hp_cap"]
-        hp = _num(work.get("HP", pd.Series(index=work.index)))
-        work = work[hp.notna() & (hp <= 2 * cap)]
-        trace.append({
-            "step": 13,
-            "label": f"HP ≤ {2 * cap} (2× preferred {cap} HP cap)",
-            "rows_left": len(work),
-        })
+    # Setting HP hard cap: Home / Shop-office preferred cap is 3 HP, hard ceiling 6 HP.
+    hp_cap = vec.get("hp_cap")
+    if hp_cap is not None:
+        hp = _num(_column(work, "HP"))
+        work = work[hp.isna() | (hp <= 2 * hp_cap)]
+        _trace(trace, 11, f"HP ≤ {2 * hp_cap} where HP is known (2× preferred {hp_cap} HP cap)", work)
     else:
-        trace.append({"step": 13, "label": "HP hard cap skipped for this setting", "rows_left": len(work)})
+        _trace(trace, 11, "HP hard cap skipped for this Setting", work)
 
     return work, trace
 
 
-def _safe(numerator, denominator):
-    if denominator is None or denominator <= 0 or pd.isna(denominator):
+def _vcode_is_12_plus(value: Any) -> bool:
+    if value is None or pd.isna(value):
+        return False
+    text = str(value).strip().upper().replace("V", "")
+    try:
+        return float(text) >= 12
+    except Exception:
+        return False
+
+
+def _safe_score(target: float, minimum: float, maximum: float) -> float:
+    width = maximum - minimum
+    if not np.isfinite(width) or width <= 0:
         return 0.0
-    return max(0.0, min(1.0, 1.0 - abs(numerator) / denominator))
+    midpoint = (minimum + maximum) / 2.0
+    return max(0.0, min(1.0, 1.0 - abs(target - midpoint) / width))
 
 
-def _voltage_bonus(row, vec):
-    special = vec["special"]
+def _voltage_rank_and_flags(row: pd.Series, vec: dict) -> tuple[float, list[str]]:
+    special = vec.get("special", {})
     variant = special.get("c9_variant")
-    bonus = 0.0
-    flags = []
+    flags: list[str] = []
+    rank = 0.0
 
     if variant == "single_band":
         vmin = pd.to_numeric(row.get("Single Phase Minimum Voltage"), errors="coerce")
         vmax = pd.to_numeric(row.get("Single Phase Maximum Voltage"), errors="coerce")
-
         if pd.isna(vmin) or pd.isna(vmax):
             if special.get("c9_band") == "single_normal_200_240":
                 flags.append("confirm_voltage")
-            return bonus, flags
-
+            return -1.0, flags
         if special.get("c9_band") == "single_low_under_200":
-            # Best around 180–185 V; slight negative tilt for higher min voltage.
-            bonus -= min(4.0, max(0.0, (vmin - 185) / 10.0))
+            # Best sag tolerance is a min voltage close to the 180–185 V floor.
+            rank = -abs(float(vmin) - 182.5)
         else:
-            if vmin >= 200 and vmax <= 240:
-                bonus += 2.0
-            elif 180 <= vmin < 200:
-                bonus -= 2.0
+            if float(vmin) >= 200 and float(vmax) <= 240:
+                rank = 2.0
+            elif 180 <= float(vmin) < 200:
+                rank = 0.5
+            else:
+                rank = 0.0
 
-    elif variant in {"farm_single_range", "three_phase_range"}:
-        # Range variants are already hard-filtered. Keep scoring hydraulic-only.
-        bonus += 0.0
+    elif variant == "farm_single_range":
+        site_min = special.get("c9_min_v")
+        site_max = special.get("c9_max_v")
+        vmin = pd.to_numeric(row.get("Single Phase Minimum Voltage"), errors="coerce")
+        vmax = pd.to_numeric(row.get("Single Phase Maximum Voltage"), errors="coerce")
+        if pd.notna(vmin) and pd.notna(vmax) and site_min is not None and site_max is not None:
+            rank = float(site_min - vmin) + float(vmax - site_max)
 
-    return bonus, flags
+    elif variant == "three_phase_range":
+        site_min = special.get("c9_min_v")
+        site_max = special.get("c9_max_v")
+        vmin = pd.to_numeric(row.get("Three Phase Minimum Voltage"), errors="coerce")
+        vmax = pd.to_numeric(row.get("Three Phase Maximum Voltage"), errors="coerce")
+        if pd.notna(vmin) and pd.notna(vmax) and site_min is not None and site_max is not None:
+            rank = float(site_min - vmin) + float(vmax - site_max)
+
+    return rank, flags
+
+
+def _speed_rank_and_flags(row: pd.Series, vec: dict) -> tuple[float, list[str]]:
+    flags: list[str] = []
+    if row.get("Type") != "Self-Priming Pump":
+        return 0.0, flags
+
+    rpm = pd.to_numeric(row.get("Speed (RPM)"), errors="coerce")
+    water_scarce = bool(vec.get("special", {}).get("water_scarce"))
+    if water_scarce:
+        flags.append("water_scarcity_slow_speed_advisory")
+
+    if pd.isna(rpm):
+        flags.append("speed_unknown_selfpriming")
+        return -1.0, flags
+
+    is_slow = float(rpm) < 1500
+    if water_scarce:
+        return (2.0 if is_slow else 0.5), flags
+    return (2.0 if not is_slow else 0.5), flags
+
+
+def _row_flags_from_vector(vec: dict) -> list[str]:
+    return list(vec.get("warnings", []))
 
 
 def score_skus(df: pd.DataFrame, vec: dict):
-    if len(df) == 0:
-        return df.assign(score=pd.Series(dtype=float))
+    """Score survivors using the v1.1 midpoint method and stable tie-breakers."""
 
-    typ_h = vec["typical_head"]
-    typ_f = vec["typical_flow"]
+    if len(df) == 0:
+        return df.assign(score=pd.Series(dtype=float), flags=pd.Series(dtype=object))
+
+    typ_h = float(vec["typical_head"])
+    typ_f = float(vec["typical_flow"])
     hp_cap = vec.get("hp_cap")
+    base_vector_flags = _row_flags_from_vector(vec)
     rows = []
 
     for _, r in df.iterrows():
-        min_h, max_h = r["Min Head (m)"], r["Max Head (m)"]
-        min_f, max_f = r["Min Flow (LPH)"], r["Max Flow (LPH)"]
+        min_h, max_h = float(r["Min Head (m)"]), float(r["Max Head (m)"])
+        min_f, max_f = float(r["Min Flow (LPH)"]), float(r["Max Flow (LPH)"])
 
-        head_mid = (min_h + max_h) / 2
-        flow_mid = (min_f + max_f) / 2
-
-        head_score = _safe(typ_h - head_mid, max_h - min_h)
-        flow_score = _safe(typ_f - flow_mid, max_f - min_f)
+        head_score = _safe_score(typ_h, min_h, max_h)
+        flow_score = _safe_score(typ_f, min_f, max_f)
 
         penalties = 0.0
         bonus = 0.0
-        flags = []
+        flags = list(base_vector_flags)
 
         hp = pd.to_numeric(r.get("HP"), errors="coerce")
         if hp_cap is not None and pd.notna(hp) and hp > hp_cap:
-            penalties += min(15, (hp - hp_cap) * 3)
+            penalties += min(15.0, float(hp - hp_cap) * 3.0)
 
         if pd.isna(r.get("_phase_norm")):
-            penalties += 8
+            penalties += 8.0
             flags.append("confirm_phase_before_purchase")
 
         if (
-            vec["special"].get("suction_lift_required") is not None
+            vec.get("special", {}).get("suction_lift_required") is not None
             and r.get("Type") == "Self-Priming Pump"
             and pd.isna(pd.to_numeric(r.get("Suction Lift (m)"), errors="coerce"))
         ):
-            penalties += 5
+            penalties += 5.0
             flags.append("suction_lift_unknown")
 
-        rpm = pd.to_numeric(r.get("Speed (RPM)"), errors="coerce")
-        if r.get("Type") == "Self-Priming Pump":
-            if pd.isna(rpm):
-                flags.append("speed_unknown_selfpriming")
-            elif vec.get("run_hours", 0) >= 6:
-                # Long duty: slow-speed is preferred.
-                if rpm < 1500:
-                    bonus += 1.5
-                else:
-                    bonus -= 1.5
-            elif vec["special"].get("c9_variant"):
-                # Short/normal clean-water duty: high-speed self-priming is preferred.
-                if rpm >= 1500:
-                    bonus += 1.0
+        voltage_rank, voltage_flags = _voltage_rank_and_flags(r, vec)
+        flags.extend(voltage_flags)
 
-        if vec["special"].get("prefer_slim_v3") and str(r.get("Pump Diameter")) == "V3":
-            v3_type = str(r.get("V3 Type", "")).strip().lower()
-            if v3_type == "slim v3":
-                bonus += 1.5
-            elif v3_type in {"not found", "", "nan"}:
-                flags.append("confirm_v3_fitment")
+        speed_rank, speed_flags = _speed_rank_and_flags(r, vec)
+        flags.extend(speed_flags)
 
-        vb, vf = _voltage_bonus(r, vec)
-        bonus += vb
-        flags.extend(vf)
+        if vec.get("special", {}).get("municipal_path") and r.get("Type") == "Self-Priming Pump":
+            flags.append("municipal_marginal_pressure")
+            municipal_rank = -1.0
+        else:
+            municipal_rank = 0.0
 
-        if vec.get("run_hours") == 14 and str(r.get("Cooling Type", "")).lower() == "water-cooled":
+        # Very small cooling signal for continuous duty. Kept deliberately small.
+        cooling = str(r.get("Cooling Type", "")).strip().lower()
+        if vec.get("run_hours") == 14 and cooling and cooling not in NA_STRINGS:
             bonus += 1.0
 
-        final = round(60 * head_score + 40 * flow_score + bonus - penalties)
-
-        rows.append({
-            "score": final,
-            "head_score": round(head_score, 4),
-            "flow_score": round(flow_score, 4),
-            "bonus": round(bonus, 2),
-            "penalties": round(penalties, 2),
-            "flags": list(dict.fromkeys(flags)),
-        })
+        final = max(0, round(60 * head_score + 40 * flow_score + bonus - penalties))
+        rows.append(
+            {
+                "score": final,
+                "head_score": round(head_score, 4),
+                "flow_score": round(flow_score, 4),
+                "bonus": round(bonus, 2),
+                "penalties": round(penalties, 2),
+                "flags": list(dict.fromkeys(flags)),
+                "_voltage_rank": round(float(voltage_rank), 4),
+                "_speed_rank": round(float(speed_rank), 4),
+                "_municipal_rank": round(float(municipal_rank), 4),
+            }
+        )
 
     extra = pd.DataFrame(rows, index=df.index)
     out = pd.concat([df, extra], axis=1)
-    out = out.sort_values(["score", "_cat_order"], ascending=[False, True], kind="mergesort")
-    return out
+
+    sort_cols = ["score", "_voltage_rank", "_speed_rank", "_municipal_rank"]
+    ascending = [False, False, False, False]
+    if "HP" in out.columns:
+        out["_hp_sort"] = pd.to_numeric(out["HP"], errors="coerce").fillna(float("inf"))
+        sort_cols.append("_hp_sort")
+        ascending.append(True)
+    sort_cols.append("_cat_order")
+    ascending.append(True)
+
+    return out.sort_values(sort_cols, ascending=ascending, kind="mergesort")
 
 
-def lift_flags(ans: dict):
+def lift_flags(ans: dict) -> list[tuple[str, str]]:
     flags = []
     lift = ans.get("lift")
-
     if lift == "floors_16_25":
         flags.append(("staged_pumping_recommended", "High-rise: staged pumping is normally recommended at 16–25 floors."))
-
-    if lift == "floors_26_40":
+    elif lift == "floors_26_40":
         flags.append(("multi_zone_booster_required", "Multi-zone booster scheme typically required at 26–40 floors."))
-
-    if lift == "floors_41_60":
+    elif lift == "floors_41_60":
         flags.append(("consultant_review_recommended", "Consultant review recommended for 41–60 floor schemes."))
-
-    if lift == "floors_above_60":
+    elif lift == "floors_above_60":
         flags.append(("custom_engineering_required", "Above 60 floors normally requires custom engineering."))
-
-    if ans.get("c6_quality") == "industrial_effluent":
-        flags.append(("custom_engineering_required", "Industrial effluent is outside normal catalogue scope."))
-
+    if ans.get("drain_rate") == "industrial_large":
+        flags.append(("custom_engineering_required", "Industrial / large-scale dewatering usually needs a multi-pump or consultant design."))
+    if ans.get("water_scarce"):
+        flags.append(("water_scarcity_slow_speed_advisory", "For intermittent or water-scarce supply, Slow-Speed Self-Priming pumps are promoted in ranking."))
     return flags
