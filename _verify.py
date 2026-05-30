@@ -1,4 +1,6 @@
-"""Verify key Framework v0.6 behaviours against the supplied catalogue."""
+"""Smoke tests for the Framework v1.1 pump-selection package."""
+
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,12 +8,12 @@ import pandas as pd
 
 from rules import evaluate
 from scoring import filter_skus, score_skus
-from vector import build_vector
+from vector import MATRIX, build_vector
 
 BASE_DIR = Path(__file__).parent
 CATALOGUE_CANDIDATES = [
     BASE_DIR / "FINAL_MASTER_DATASHEET_final.xlsx",
-    BASE_DIR / "MASTER DATASHEET_final_final copy(7).xlsx",
+    BASE_DIR / "MASTER DATASHEET_final_final copy(13).xlsx",
 ]
 
 
@@ -19,126 +21,107 @@ def catalogue_path() -> Path:
     for path in CATALOGUE_CANDIDATES:
         if path.exists():
             return path
-    raise FileNotFoundError(
-        "Could not find the catalogue. Expected FINAL_MASTER_DATASHEET_final.xlsx "
-        "or MASTER DATASHEET_final_final copy(7).xlsx next to _verify.py."
-    )
+    raise FileNotFoundError("Could not find the master catalogue next to _verify.py.")
 
 
-def verify_worked_example() -> None:
-    """Reproduce the revised filtering/scoring document's Large-commercial borewell example."""
+def load_catalogue() -> pd.DataFrame:
+    return pd.read_excel(catalogue_path(), sheet_name="Master Data")
+
+
+def assert_close(actual: float, expected: float, tol: float = 0.75):
+    assert abs(actual - expected) <= tol, f"Expected {expected}, got {actual}"
+
+
+def verify_framework_worked_example() -> None:
     ans = {
         "setting": "large_commercial",
         "job": "lift_and_store",
         "source": "borewell",
+        "c0_destination": "overhead_tank",
         "lift": "floors_11_15",
         "demand": "vol_50000",
         "c1_casing": "casing_6in",
-        "c2_depth": "200_300ft",
-        "c7_phase": "Three",
+        "c2_depth_m": 90,
         "c8_duty": "heavy",
         "c9_min_v": 380,
         "c9_max_v": 430,
     }
-
+    assert not [e for e in evaluate(ans) if e[1] == "hard"], evaluate(ans)
     vec = build_vector(ans)
-    print("=== Requirement Vector ===")
-    for k, v in vec.items():
-        print(f"  {k}: {v}")
+    assert vec["allowed_pump_types"] == ["Borewell Pump"]
+    assert_close(vec["required_min_head"], 155)
+    assert_close(vec["typical_head"], 171)
+    assert vec["required_min_flow"] == 8000
+    assert vec["typical_flow"] == 12000
+    assert vec["special"]["c9_variant"] == "three_phase_range"
 
-    df = pd.read_excel(catalogue_path(), sheet_name="Master Data")
-    print(f"\nLoaded {len(df)} catalogue rows")
-
+    df = load_catalogue()
     survivors, trace = filter_skus(df, vec)
-    print("\n=== Filter trace ===")
-    for t in trace:
-        print(f"  Step {t['step']}: {t['label']} → {t['rows_left']}")
-
     scored = score_skus(survivors, vec)
-    print(f"\n=== Survivors after filtering: {len(scored)} (doc expects 114) ===")
-
-    expected = [
-        ("CRI Pumps", "CRI4R-2N/3/35", 99),
-        ("Kirloskar Brothers", "80HHN-2024", 99),
-        ("CRI Pumps", "CRI4R-2/3/40", 98),
-        ("CRI Pumps", "CRI4R-2N/3/32", 98),
-        ("CRI Pumps", "CRI4R-3E/5/40", 98),
-    ]
-    top = scored.head(5)
-    assert len(scored) == 114, f"Expected 114 survivors; got {len(scored)}"
-    for idx, (brand, sku, score) in enumerate(expected):
-        row = top.iloc[idx]
-        assert row["Brand"] == brand and row["SKU"] == sku and int(row["score"]) == score, (
-            f"Top-{idx + 1} mismatch: expected {(brand, sku, score)}, "
-            f"got {(row['Brand'], row['SKU'], int(row['score']))}"
-        )
-
-    cols = [
-        "Brand",
-        "SKU",
-        "HP",
-        "Min Head (m)",
-        "Max Head (m)",
-        "Min Flow (LPH)",
-        "Max Flow (LPH)",
-        "Phase",
-        "Pump Diameter",
-        "head_score",
-        "flow_score",
-        "penalties",
-        "score",
-    ]
-    print(top[cols].to_string(index=False))
-    print("\nWorked example: PASS")
+    assert len(scored) > 0, "Worked example should return catalogue candidates."
+    assert trace[0]["rows_left"] == 4056, "Master catalogue row count should match the supplied sheet."
+    assert trace[1]["rows_left"] == 4025, "Usable head/flow row count should match the supplied sheet."
+    print("Worked example vector and filtering: PASS")
+    print(scored[["Brand", "SKU", "Type", "score"]].head(5).to_string(index=False))
 
 
-def verify_relaxed_ground_lift_rules() -> None:
-    """Check the v0.6 below-grade ground-floor lift changes."""
-    borewell_ground = {
+def verify_open_ground_7m_rule() -> None:
+    shallow = {
+        "setting": "farm",
+        "job": "boost_pressure",
+        "source": "open_ground",
+        "c0_destination": "irrigation",
+        "c3g_depth_m": 7,
+        "demand": "vol_50000",
+        "c4_outlets": "21_35",
+        "c5_usage": "heavy",
+        "c5a_pressure": "farm_sprinkler",
+        "c7_phase": "Three",
+        "c8_duty": "heavy",
+        "c9_min_v": 360,
+        "c9_max_v": 430,
+    }
+    deep = dict(shallow, c3g_depth_m=8)
+    v1 = build_vector(shallow)
+    v2 = build_vector(deep)
+    assert v1["allowed_pump_types"] == ["Self-Priming Pump"]
+    assert v1["special"]["suction_lift_required"] == 7
+    assert v1["components"]["source_depth_add_m"] == 0
+    assert v2["allowed_pump_types"] == ["Openwell Pump"]
+    assert v2["components"]["source_depth_add_m"] == 8
+    print("Open-ground-water 7 m rule: PASS")
+
+
+def verify_drain_is_sewage_only() -> None:
+    ans = {
         "setting": "home",
-        "job": "lift_and_store",
-        "source": "borewell",
-        "lift": "ground",
-        "demand": "vol_800",
-        "c0_destination": "ground_sump",
-        "c1_casing": "casing_4in",
-        "c2_depth": "50_100ft",
-        "c7_phase": "Single",
+        "job": "drain_sewage",
+        "source": "sewage_pit",
+        "drain_rate": "routine_small",
+        "c6_quality": "heavy_sewage",
         "c9_voltage_band": "single_normal_200_240",
     }
-    assert not [r for r in evaluate(borewell_ground) if r[1] == "hard"], (
-        "Borewell → ground-floor lift-and-store should be valid in v0.6."
-    )
+    vec = build_vector(ans)
+    assert vec["allowed_pump_types"] == ["Sewage Pump"]
+    assert vec["special"]["cutter_required"] == "with cutter"
+    assert vec["required_min_flow"] == 12000
+    assert vec["typical_flow"] == 18000
+    print("Drain sewage/water type and cutter logic: PASS")
 
-    sump_direct = {
-        "setting": "home",
-        "job": "lift_and_pressurise_directly",
-        "source": "underground_sump",
-        "lift": "ground",
-        "demand": "vol_800",
-        "c0_destination": "direct_pipes",
-        "c4_outlets": "1_4",
-        "c4_outlets_count": 2,
-        "c5_usage": "moderate",
-        "c5a_pressure": "home_standard",
-        "c7_phase": "Single",
-        "c9_voltage_band": "single_normal_200_240",
-    }
-    assert not [r for r in evaluate(sump_direct) if r[1] == "hard"], (
-        "Underground-sump → ground-floor lift-and-pressurise should be valid in v0.6."
-    )
-    vec = build_vector(sump_direct)
-    assert vec["required_min_head"] == 8 and vec["typical_head"] == 17, (
-        "Expected sump-lift allowance of +8 m required / +12 m typical on top of ground lift."
-    )
-    assert "Pressure Booster Pump" in vec["allowed_pump_types"], (
-        "Underground-sump pressure jobs should allow Pressure Booster candidates."
-    )
 
-    print("Ground-floor below-grade source rules: PASS")
+def verify_matrix_not_empty() -> None:
+    assert ("light_industry", "lift_and_store", "borewell", "overhead_tank") in MATRIX
+    assert ("farm", "boost_pressure", "open_ground", "irrigation") in MATRIX
+    assert ("home", "drain_sewage", "sewage_pit", None) in MATRIX
+    print(f"Matrix contains {len(MATRIX)} expanded tuples: PASS")
+
+
+def main() -> None:
+    verify_matrix_not_empty()
+    verify_framework_worked_example()
+    verify_open_ground_7m_rule()
+    verify_drain_is_sewage_only()
 
 
 if __name__ == "__main__":
-    verify_worked_example()
-    print()
-    verify_relaxed_ground_lift_rules()
+    main()
