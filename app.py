@@ -1,4 +1,4 @@
-"""Streamlit Pump Selection Assistant aligned to Framework v1.1."""
+"""Streamlit Pump Selection Assistant aligned to Framework v1.2."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ import streamlit as st
 from rules import evaluate
 from scoring import filter_skus, lift_flags, score_skus
 from vector import (
-    C5A_HEAD_ADD,
-    DRAIN_FLOW,
+    DRAIN_QUANTITY_RANGE_BY_SETTING,
+    DRAIN_TIME_HOUR_STOPS,
     JOBS,
     LOW_C9_BAND,
     MATRIX,
@@ -28,11 +28,9 @@ from vector import (
     c8_triggered,
     c9_variant,
     construction_drain_lift_triggered,
-    default_phase,
     final_phase,
     lift_triggered,
     needs_phase_confirm,
-    source_depth_field,
     build_vector,
 )
 
@@ -100,6 +98,11 @@ COMPACT_CARD_CSS = """
 .detailed-specs .spec-box { min-height:62px; }
 .input-note { padding:12px 14px; border:1px solid var(--line,#e2e8f0); background:#f8fafc; border-radius:16px; color:#475569; font-weight:700; margin:8px 0 10px; }
 .warning-pill { display:inline-flex; align-items:center; margin:8px 0 14px 0; padding:10px 14px; border-radius:999px; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; font-weight:750; font-size:.86rem; line-height:1.25; }
+.requirement-card { border:1px solid var(--line,#e2e8f0); background:#fff; border-radius:18px; padding:14px; margin:10px 0; }
+.requirement-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
+.requirement-cell { border:1px solid var(--line,#e2e8f0); background:#f8fafc; border-radius:16px; padding:12px; }
+.requirement-cell small { display:block; color:#64748b; font-weight:800; margin-bottom:5px; }
+.requirement-cell strong { color:#0f172a; font-size:1rem; line-height:1.25; }
 @media(max-width:1100px) { .detailed-specs { grid-template-columns:repeat(2,minmax(0,1fr)) !important; } }
 @media(max-width:700px) { .detailed-specs { grid-template-columns:1fr !important; } [class*="st-key-optwrap_"] .stButton > button { min-height:170px !important; padding:22px 24px !important; } }
 </style>
@@ -184,14 +187,8 @@ DEMAND_OPTIONS_BY_SETTING = {
     ],
 }
 
-DRAIN_RATE_OPTIONS = [
-    ("trickle", "Trickle / occasional seepage"),
-    ("routine_small", "Routine small drainage"),
-    ("steady_moderate", "Steady moderate flow"),
-    ("heavy_flow", "Heavy flow"),
-    ("very_heavy", "Very heavy / continuous dewatering"),
-    ("industrial_large", "Industrial / large-scale dewatering"),
-]
+DRAIN_QUANTITY_STOPS = [100, 250, 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000, 250000, 500000]
+DRAIN_TIME_STOPS = DRAIN_TIME_HOUR_STOPS
 
 C1_OPTIONS = [
     ("casing_4in", "4 inch (100 mm)"),
@@ -210,6 +207,34 @@ C4_OPTIONS = [
     ("76_150", "76–150 outlets"),
     ("above_150", "More than 150 outlets"),
 ]
+
+FARM_C4_OPTIONS_BY_C5A = {
+    "farm_flood": [
+        ("farm_flood_1_2", "1–2 field outlets / furrow channels"),
+        ("farm_flood_3_5", "3–5 field outlets / furrow channels"),
+        ("farm_flood_6_10", "6–10 field outlets / furrow channels"),
+        ("farm_flood_above_10", "More than 10 field outlets / furrow channels"),
+    ],
+    "farm_drip": [
+        ("farm_drip_1_3", "1–3 drip zones / trough points"),
+        ("farm_drip_4_8", "4–8 drip zones / trough points"),
+        ("farm_drip_9_18", "9–18 drip zones / trough points"),
+        ("farm_drip_above_18", "More than 18 drip zones / trough points"),
+    ],
+    "farm_sprinkler": [
+        ("farm_sprinkler_1_4", "1–4 sprinkler heads / wash-down points"),
+        ("farm_sprinkler_5_12", "5–12 sprinkler heads / wash-down points"),
+        ("farm_sprinkler_13_25", "13–25 sprinkler heads / wash-down points"),
+        ("farm_sprinkler_26_50", "26–50 sprinkler heads / wash-down points"),
+        ("farm_sprinkler_above_50", "More than 50 sprinkler heads / wash-down points"),
+    ],
+    "farm_rain_gun": [
+        ("farm_rain_gun_1", "1 rain gun / high-pressure sprinkler"),
+        ("farm_rain_gun_2_3", "2–3 rain guns / high-pressure sprinklers"),
+        ("farm_rain_gun_4_6", "4–6 rain guns / high-pressure sprinklers"),
+        ("farm_rain_gun_above_6", "More than 6 rain guns / high-pressure sprinklers"),
+    ],
+}
 
 C5_OPTIONS = [
     ("light", "Light — most outlets used one at a time"),
@@ -281,6 +306,23 @@ OPTION_DESCRIPTIONS = {
         "36_75": "Mid-size hotel, hostel, dairy, office floor, or larger service area.",
         "76_150": "Large hotel, apartment block, institution, or farm application.",
         "above_150": "Large complex, campus, estate, or industrial site.",
+        "farm_flood_1_2": "Small field channel or hand-watering setup.",
+        "farm_flood_3_5": "Several furrows or field outlets operating from one pump.",
+        "farm_flood_6_10": "Larger field section with many channels.",
+        "farm_flood_above_10": "Large flood/furrow layout; confirm pipe sizing.",
+        "farm_drip_1_3": "Small drip or livestock group.",
+        "farm_drip_4_8": "Moderate drip zoning or trough distribution.",
+        "farm_drip_9_18": "Large drip or livestock network.",
+        "farm_drip_above_18": "Very large drip zoning; confirm irrigation design.",
+        "farm_sprinkler_1_4": "Small sprinkler block or wash-down area.",
+        "farm_sprinkler_5_12": "Typical farm sprinkler group.",
+        "farm_sprinkler_13_25": "Larger sprinkler block.",
+        "farm_sprinkler_26_50": "Large sprinkler network; confirm pipe sizing.",
+        "farm_sprinkler_above_50": "Very large sprinkler network; likely needs design review.",
+        "farm_rain_gun_1": "Single high-pressure rain-gun point.",
+        "farm_rain_gun_2_3": "Small high-pressure rain-gun group.",
+        "farm_rain_gun_4_6": "Larger high-pressure rain-gun group.",
+        "farm_rain_gun_above_6": "Very large rain-gun layout; likely needs design review.",
     },
     "c5_usage": {
         "light": "Most outlets are used one at a time. Typical for a small home.",
@@ -327,7 +369,7 @@ OPTION_DESCRIPTIONS = {
 
 FIELD_ORDER = [
     "setting", "job", "source", "c0_destination", "lift", "construction_lift_m",
-    "c1_casing", "c2_depth_m", "c3_depth_m", "c3g_depth_m", "demand", "drain_rate",
+    "c1_casing", "c2_depth_m", "c3_depth_m", "c3g_depth_m", "demand", "drain_quantity_l", "drain_time_h",
     "c4_outlets", "c5_usage", "c5a_pressure", "c6_quality", "water_scarce", "c7_phase",
     "c8_duty", "c9_voltage_band", "c9_min_v", "c9_max_v",
 ]
@@ -364,6 +406,9 @@ def set_answer(field, value, payload=None):
         for downstream in FIELD_ORDER[FIELD_ORDER.index(field):]:
             ans.pop(downstream, None)
     ans[field] = value
+    if field == "c5a_pressure" and ans.get("setting") == "farm" and previous != value:
+        ans.pop("c4_outlets", None)
+        ans.pop("c5_usage", None)
     if field == "job" and value == "drain_sewage":
         ans["source"] = "sewage_pit"
         ans["c0_destination"] = None
@@ -384,8 +429,6 @@ def option_description(field: str, option_id) -> str:
     ans = current_answers()
     if field == "demand":
         return demand_description(ans.get("setting"), option_id)
-    if field == "drain_rate":
-        return DRAIN_RATE_DESCRIPTIONS.get(option_id, "")
     if field in {"c9_min_v", "c9_max_v"}:
         return "Choose the nearest value you normally see at the pump location."
     return OPTION_DESCRIPTIONS.get(field, {}).get(option_id, "")
@@ -431,13 +474,30 @@ DEMAND_DESCRIPTIONS_BY_SETTING = {
     },
 }
 
-DRAIN_RATE_DESCRIPTIONS = {
-    "trickle": "A pit or sump that empties slowly, such as minor groundwater seepage or an occasional spill.",
-    "routine_small": "Bathroom, basement, small domestic sump, or a single washroom block.",
-    "steady_moderate": "Flooded room, shop or restaurant floor, or a mid-size building sump.",
-    "heavy_flow": "Small construction pit, large building sump, car-park runoff, or storm runoff.",
-    "very_heavy": "Active construction dewatering, lift station, or a large site running for long periods.",
-    "industrial_large": "Major infrastructure or large-scale dewatering where a multi-pump design may be needed.",
+DRAIN_QUANTITY_DESCRIPTIONS = {
+    100: "Small sump pit or bathroom wastewater",
+    250: "Large pit or small collection chamber",
+    500: "Small tank or accumulated drainage water",
+    1000: "One kilolitre tank or storage chamber",
+    2000: "Small underground tank or holding tank",
+    5000: "Large storage tank or basement water removal",
+    10000: "Large tank, flooded basement, or site drainage",
+    25000: "Major water accumulation or commercial drainage",
+    50000: "Heavy drainage, floodwater, or large site dewatering",
+    100000: "Large-scale site dewatering or multi-block drainage",
+    250000: "Major infrastructure or continuous dewatering",
+    500000: "Very large dewatering; usually a multi-pump scheme",
+}
+
+DRAIN_TIME_DESCRIPTIONS = {
+    0.25: "Clear it almost immediately — urgent / flooding.",
+    0.5: "Clear it quickly.",
+    0.75: "Clear it fairly quickly.",
+    1: "Clear it within the hour.",
+    2: "Steady clearing over a couple of hours.",
+    4: "Gradual clearing over a half-day.",
+    6: "Slow clearing across a working shift.",
+    8: "Slowest setting — clear it over a full shift.",
 }
 
 
@@ -650,6 +710,15 @@ def render_slider_question(step: str, title: str, field: str, min_value: int, ma
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+LIFT_MAX_FLOORS_BY_SETTING = {
+    "home": 5,
+    "shop_small_comm": 5,
+    "farm": 3,
+    "large_commercial": 60,
+    "light_industry": 40,
+}
+
+
 def render_floor_slider_question(step: str, title: str, field: str = "lift", default: int = 0):
     ans = current_answers()
     raw_value = ans.get(field, default)
@@ -666,19 +735,81 @@ def render_floor_slider_question(step: str, title: str, field: str = "lift", def
         "floors_41_60": 60,
         "floors_above_60": 60,
     }
+    max_floors = LIFT_MAX_FLOORS_BY_SETTING.get(ans.get("setting"), 60)
     try:
         value = int(raw_value)
     except Exception:
         value = legacy_floor_values.get(str(raw_value), default)
-    value = max(0, min(60, value))
+    value = max(0, min(max_floors, value))
     st.markdown('<div class="question-panel compact-question-panel">', unsafe_allow_html=True)
     st.markdown(f'<div class="step-badge">{step}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-help">Move the slider to the highest floor or tank level the water needs to reach.</div>', unsafe_allow_html=True)
-    value = st.slider(" ", min_value=0, max_value=60, value=value, step=1, format="%d floor(s)", key=f"slider_{field}", label_visibility="collapsed")
+    st.markdown(f'<div class="section-help">Move the slider to the highest floor or tank level the water needs to reach. This setting allows up to {max_floors} floor(s).</div>', unsafe_allow_html=True)
+    value = st.slider(" ", min_value=0, max_value=max_floors, value=value, step=1, format="%d floor(s)", key=f"slider_{field}", label_visibility="collapsed")
     set_numeric(field, int(value))
-    st.markdown(f'<div class="input-note">{floor_example_text(int(value))}</div>', unsafe_allow_html=True)
+    suffix = f" Estimated vertical lift: {int(value) * 3} m." if ans.get("setting") == "farm" else ""
+    st.markdown(f'<div class="input-note">{floor_example_text(int(value))}{suffix}</div>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _format_litres(value: int) -> str:
+    return f"{value:,} L"
+
+
+def _format_hours(value: float) -> str:
+    if value == 0.25:
+        return "15 min"
+    if value == 0.5:
+        return "30 min"
+    if value == 0.75:
+        return "45 min"
+    return f"{int(value)} hr" if float(value).is_integer() else f"{value:g} hr"
+
+
+def render_select_slider_question(step: str, title: str, field: str, options: list, default, help_text: str, format_func, description_lookup: dict):
+    ans = current_answers()
+    value = ans.get(field, default)
+    if value not in options:
+        value = default if default in options else options[0]
+    st.markdown('<div class="question-panel compact-question-panel">', unsafe_allow_html=True)
+    st.markdown(f'<div class="step-badge">{step}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-help">{help_text}</div>', unsafe_allow_html=True)
+    value = st.select_slider(" ", options=options, value=value, format_func=format_func, key=f"slider_{field}", label_visibility="collapsed")
+    set_numeric(field, value)
+    desc = description_lookup.get(value, "")
+    if desc:
+        st.markdown(f'<div class="input-note">{desc}</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_drain_quantity_slider(ans: dict):
+    mn, mx = DRAIN_QUANTITY_RANGE_BY_SETTING.get(ans.get("setting"), (100, 50000))
+    options = [v for v in DRAIN_QUANTITY_STOPS if mn <= v <= mx]
+    default = options[min(3, len(options) - 1)]
+    render_select_slider_question(
+        "Step 6",
+        "How much water or sewage needs to be pumped out?",
+        "drain_quantity_l",
+        options,
+        default,
+        "Choose the closest quantity to be cleared from the pit, sump, basement, or site.",
+        _format_litres,
+        DRAIN_QUANTITY_DESCRIPTIONS,
+    )
+
+
+def render_drain_time_slider():
+    render_select_slider_question(
+        "Step 7",
+        "In how much time should it be pumped out?",
+        "drain_time_h",
+        DRAIN_TIME_STOPS,
+        1,
+        "Shorter times need a higher-flow pump; longer times allow a smaller flow requirement.",
+        _format_hours,
+        DRAIN_TIME_DESCRIPTIONS,
+    )
 
 
 def render_checkbox_question(step: str, title: str, field: str, help_text: str):
@@ -709,7 +840,7 @@ def required_fields(ans: dict) -> list[str]:
     elif ans.get("source") == "open_ground":
         fields.append("c3g_depth_m")
     if ans.get("job") == "drain_sewage":
-        fields += ["drain_rate", "c6_quality"]
+        fields += ["drain_quantity_l", "drain_time_h", "c6_quality"]
     elif ans.get("job") in {"lift_and_store", "boost_pressure"}:
         fields.append("demand")
     if ans.get("job") == "boost_pressure":
@@ -733,7 +864,7 @@ def ready_for_power(ans: dict) -> bool:
     if not ans.get("setting") or not ans.get("job"):
         return False
     if ans.get("job") == "drain_sewage":
-        return bool(ans.get("drain_rate") and ans.get("c6_quality"))
+        return bool(ans.get("drain_quantity_l") and ans.get("drain_time_h") and ans.get("c6_quality"))
     if not ans.get("source") or not ans.get("c0_destination") or not ans.get("demand"):
         return False
     if lift_triggered(ans) and ans.get("lift") is None:
@@ -804,12 +935,66 @@ def show_soft_warnings(ans: dict):
             st.markdown(f'<div class="warning-box">⚠ {reason}</div>', unsafe_allow_html=True)
 
 
+def _fmt_number(value, suffix=""):
+    try:
+        number = float(value)
+    except Exception:
+        return "—"
+    if number >= 1000 and suffix.strip().upper() == "LPH":
+        return f"{number:,.0f} {suffix}".strip()
+    if number.is_integer():
+        return f"{int(number):,} {suffix}".strip()
+    return f"{number:,.1f} {suffix}".strip()
+
+
+def render_requirement_matrix(vec: dict):
+    if not vec:
+        return
+    phase = vec.get("final_phase") or "—"
+    pump_types = ", ".join(vec.get("allowed_pump_types") or []) or "—"
+    friendly = [
+        ("Lift / pressure", f"About {_fmt_number(vec.get('typical_head'), 'm')} target head"),
+        ("Delivery", f"About {_fmt_number(vec.get('typical_flow'), 'LPH')} target flow"),
+        ("Power", f"{phase}-phase" if phase != "—" else "—"),
+        ("Suitable pump type(s)", pump_types),
+    ]
+    st.markdown('<div class="requirement-card">', unsafe_allow_html=True)
+    st.markdown('<h3 class="section-title">Requirement matrix</h3><p class="section-help">Shown before SKUs so the sizing assumptions are visible.</p>', unsafe_allow_html=True)
+    st.markdown('<div class="requirement-grid">', unsafe_allow_html=True)
+    for label, value in friendly:
+        st.markdown(f'<div class="requirement-cell"><small>{label}</small><strong>{value}</strong></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    special = vec.get("special", {})
+    if special.get("c9_variant") == "single_band":
+        voltage = "Single-phase band: below 200 V" if special.get("c9_band") == LOW_C9_BAND else "Single-phase band: 200–240 V"
+    elif special.get("c9_variant") in {"farm_single_range", "three_phase_range"}:
+        voltage = f"{special.get('c9_min_v', '—')}–{special.get('c9_max_v', '—')} V site range"
+    else:
+        voltage = "—"
+    hp_cap = vec.get("hp_cap")
+    hp_cap_text = f"Preferred {hp_cap} HP; hard cap {2 * hp_cap} HP" if hp_cap else "No setting cap"
+    rows = [
+        ["Eligible pump type(s)", pump_types, "SKU Type must be in this set."],
+        ["Required minimum head", _fmt_number(vec.get("required_min_head"), "m"), "Keep SKUs with Max Head at or above this hard floor."],
+        ["Head upper-edge target", _fmt_number(vec.get("typical_head"), "m"), "Keep SKUs with Min Head at or below this target; also used for ranking."],
+        ["Required minimum flow", _fmt_number(vec.get("required_min_flow"), "LPH"), "Keep SKUs with Max Flow at or above this hard floor."],
+        ["Flow upper-edge target", _fmt_number(vec.get("typical_flow"), "LPH"), "Keep SKUs with Min Flow at or below this target; also used for ranking."],
+        ["Power supply phase", f"{phase}-phase" if phase != "—" else "—", "Keep Single/Both or Three/Both according to the final phase."],
+        ["Voltage envelope", voltage, "Apply the C9 voltage hard filter and ranking headroom."],
+        ["HP cap", hp_cap_text, "Apply the Home / Shop hard cap and soft oversize penalty where relevant."],
+    ]
+    with st.expander("Sales-engineer view"):
+        st.table(pd.DataFrame(rows, columns=["Specification", "Value", "How it filters / ranks"]))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_vector_panel(vec: dict | None):
     ans = current_answers()
     st.markdown('<div class="side-panel">', unsafe_allow_html=True)
     st.markdown('<h2 class="side-title">Selection summary</h2><p class="side-subtitle">Your answers will guide the recommendations.</p>', unsafe_allow_html=True)
     if not vec:
-        st.markdown('<div class="empty-card">Complete the questions to see matched pump recommendations.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="empty-card">Complete the questions to see the requirement matrix and matched pump recommendations.</div>', unsafe_allow_html=True)
     else:
         summary_items = []
         if ans.get("source"):
@@ -819,16 +1004,18 @@ def render_vector_panel(vec: dict | None):
         if ans.get("demand"):
             label = dict(DEMAND_OPTIONS_BY_SETTING.get(ans.get("setting"), [])).get(ans.get("demand"), "Selected demand")
             summary_items.append(("Water use", label))
-        if ans.get("drain_rate"):
-            summary_items.append(("Drainage amount", dict(DRAIN_RATE_OPTIONS).get(ans.get("drain_rate"), ans.get("drain_rate"))))
+        if ans.get("drain_quantity_l"):
+            summary_items.append(("Drainage volume", _format_litres(int(ans.get("drain_quantity_l")))))
+        if ans.get("drain_time_h"):
+            summary_items.append(("Clear-out time", _format_hours(float(ans.get("drain_time_h")))))
         if final_phase(ans):
             summary_items.append(("Power", f"{final_phase(ans)}-phase"))
         st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
         for label, value in summary_items[:4]:
             st.markdown(f'<div class="metric-card"><small>{label}</small><strong>{value}</strong></div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+        render_requirement_matrix(vec)
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 def _json_safe(v):
     if isinstance(v, set):
@@ -962,15 +1149,28 @@ def render_recommendations(scored, trace=None):
 # ---------------------------------------------------------------------------
 
 
+def path_allows_self_priming(ans: dict) -> bool:
+    if ans.get("job") == "drain_sewage":
+        return False
+    key = (ans.get("setting"), ans.get("job"), ans.get("source"), ans.get("c0_destination"))
+    if None in key:
+        return False
+    allowed = MATRIX.get(key, [])
+    if "Self-Priming Pump" not in allowed:
+        return False
+    if ans.get("source") == "open_ground" and float(ans.get("c3g_depth_m") or 99) > 7:
+        return False
+    return True
+
+
 def maybe_render_water_scarcity(ans: dict):
-    if ans.get("source") in {"open_ground", "underground_sump", "municipal"}:
-        if ans.get("source") != "open_ground" or ans.get("c3g_depth_m", 99) <= 7:
-            render_checkbox_question(
-                "Optional advisory",
-                "Water supply condition",
-                "water_scarce",
-                "Select this when the water source is intermittent, slow to refill, or water-scarce.",
-            )
+    if path_allows_self_priming(ans):
+        render_checkbox_question(
+            "Optional advisory",
+            "Water supply condition",
+            "water_scarce",
+            "Select this only when a Self-Priming option is eligible and the source is intermittent, slow to refill, or water-scarce.",
+        )
 
 
 def main():
@@ -1038,27 +1238,39 @@ def main():
             ans = current_answers()
 
         if ans.get("job") == "drain_sewage":
-            render_question("Step 6", "How much water is to be removed?", "drain_rate", DRAIN_RATE_OPTIONS, "Choose the drainage situation that best matches the site.")
-            render_question("Step 7", "What is the water quality / contents?", "c6_quality", C6_OPTIONS, "Choose what the pump is likely to handle.")
+            render_drain_quantity_slider(ans)
+            render_drain_time_slider()
+            render_question("Step 8", "What is the water quality / contents?", "c6_quality", C6_OPTIONS, "Choose what the pump is likely to handle.")
             ans = current_answers()
         elif ans.get("job") in {"lift_and_store", "boost_pressure"} and ans.get("source") and (ans.get("c0_destination") or ans.get("job") == "drain_sewage"):
             render_question("Step 6", "How much water is needed?", "demand", DEMAND_OPTIONS_BY_SETTING.get(ans.get("setting"), []), "Choose the closest daily water-use range.")
             ans = current_answers()
 
         if ans.get("job") == "boost_pressure" and ans.get("demand"):
-            render_question("Pressure detail", "How many outlets or application points?", "c4_outlets", C4_OPTIONS, "Count the taps, fixtures, irrigation points, or application points that may need water.")
-            render_question("Pressure detail", "How many will run at the same time?", "c5_usage", C5_OPTIONS, "Choose the pattern that best matches peak use at the site.")
-            render_question("Pressure detail", "Fixture / application pressure class", "c5a_pressure", C5A_BY_SETTING.get(ans.get("setting"), []), "Choose the type of fixture, irrigation, or application that needs pressure.")
+            if ans.get("setting") == "farm":
+                render_question("Pressure detail", "Fixture / application pressure class", "c5a_pressure", C5A_BY_SETTING.get(ans.get("setting"), []), "Choose the irrigation or farm application that needs pressure.")
+                ans = current_answers()
+                if ans.get("c5a_pressure"):
+                    farm_options = FARM_C4_OPTIONS_BY_C5A.get(ans.get("c5a_pressure"), [])
+                    farm_question = {
+                        "farm_flood": "How many field outlets or furrow channels does this serve?",
+                        "farm_drip": "How many drip zones or trough points does this serve?",
+                        "farm_sprinkler": "How many sprinkler heads or wash-down points does this serve?",
+                        "farm_rain_gun": "How many rain guns or high-pressure sprinklers does this serve?",
+                    }.get(ans.get("c5a_pressure"), "How many farm application points does this serve?")
+                    render_question("Pressure detail", farm_question, "c4_outlets", farm_options, "The count bands are tailored to the selected Farm pressure class.")
+                    render_question("Pressure detail", "How many will run at the same time?", "c5_usage", C5_OPTIONS, "Choose the pattern that best matches peak farm use.")
+            else:
+                render_question("Pressure detail", "How many outlets or application points?", "c4_outlets", C4_OPTIONS, "Count the taps, fixtures, irrigation points, or application points that may need water.")
+                render_question("Pressure detail", "How many will run at the same time?", "c5_usage", C5_OPTIONS, "Choose the pattern that best matches peak use at the site.")
+                render_question("Pressure detail", "Fixture / application pressure class", "c5a_pressure", C5A_BY_SETTING.get(ans.get("setting"), []), "Choose the type of fixture, irrigation, or application that needs pressure.")
             ans = current_answers()
 
         maybe_render_water_scarcity(ans)
         ans = current_answers()
 
         if ready_for_power(ans):
-            if ans.get("setting") and not needs_phase_confirm(ans):
-                phase = default_phase(ans["setting"])
-                st.markdown(f'<div class="question-panel"><div class="step-badge">Power detail</div><div class="section-title">Power supply phase</div><div class="input-note">Using {phase}-phase power for this site type.</div></div>', unsafe_allow_html=True)
-            elif ans.get("setting"):
+            if ans.get("setting") and needs_phase_confirm(ans):
                 render_question("Power detail", "Power supply phase", "c7_phase", C7_OPTIONS, "Choose the power supply available at the pump location.")
                 ans = current_answers()
 
