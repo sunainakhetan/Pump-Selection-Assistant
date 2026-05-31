@@ -9,6 +9,7 @@ voltage robustness, Self-Priming speed, and municipal-path conservatism.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -359,19 +360,41 @@ def score_skus(df: pd.DataFrame, vec: dict):
     return out.sort_values(sort_cols, ascending=ascending, kind="mergesort")
 
 
+def _lift_floor_count(value) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    legacy = {
+        "ground": 0,
+        "floor_1": 1,
+        "floor_2": 2,
+        "floor_3": 3,
+        "floor_4": 4,
+        "floors_5_10": 10,
+        "floors_11_15": 15,
+        "floors_16_25": 25,
+        "floors_26_40": 40,
+        "floors_41_60": 60,
+        "floors_above_60": 60,
+    }
+    text = str(value).strip()
+    if text.replace(".", "", 1).isdigit():
+        return max(0.0, float(text))
+    return float(legacy.get(text, 0))
+
+
 def lift_flags(ans: dict) -> list[tuple[str, str]]:
     flags = []
-    lift = ans.get("lift")
-    if lift == "floors_16_25":
-        flags.append(("staged_pumping_recommended", "High-rise: staged pumping is normally recommended at 16–25 floors."))
-    elif lift == "floors_26_40":
-        flags.append(("multi_zone_booster_required", "Multi-zone booster scheme typically required at 26–40 floors."))
-    elif lift == "floors_41_60":
-        flags.append(("consultant_review_recommended", "Consultant review recommended for 41–60 floor schemes."))
-    elif lift == "floors_above_60":
-        flags.append(("custom_engineering_required", "Above 60 floors normally requires custom engineering."))
+    floors = _lift_floor_count(ans.get("lift"))
+    if 16 <= floors <= 25:
+        flags.append(("staged_pumping_recommended", "High-rise: staged pumping is normally recommended for 16–25 floors."))
+    elif 26 <= floors <= 40:
+        flags.append(("multi_zone_booster_required", "Multi-zone booster scheme is typically used for 26–40 floors."))
+    elif floors >= 41:
+        flags.append(("consultant_review_recommended", "Consultant review is recommended for 41+ floor schemes."))
     if ans.get("drain_rate") == "industrial_large":
         flags.append(("custom_engineering_required", "Industrial / large-scale dewatering usually needs a multi-pump or consultant design."))
     if ans.get("water_scarce"):
-        flags.append(("water_scarcity_slow_speed_advisory", "For intermittent or water-scarce supply, Slow-Speed Self-Priming pumps are promoted in ranking."))
+        flags.append(("water_scarcity_slow_speed_advisory", "For intermittent or water-scarce supply, slow-speed self-priming options are prioritised where suitable."))
     return flags
