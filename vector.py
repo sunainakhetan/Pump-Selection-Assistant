@@ -10,6 +10,7 @@ C8 duty-cycle run-times, and the corrected C9 voltage-envelope model.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable
 
 # ---------------------------------------------------------------------------
@@ -64,13 +65,7 @@ PUMP_TYPES = {
 MATRIX: dict[tuple[str, str, str, str | None], list[str]] = {}
 
 
-def _add(
-    setting: str,
-    job: str,
-    source: str,
-    destinations: Iterable[str | None],
-    types: Iterable[str],
-) -> None:
+def _add(setting: str, job: str, source: str, destinations: Iterable[str | None], types: Iterable[str]) -> None:
     catalogue_types = [PUMP_TYPES[t] for t in types]
     for destination in destinations:
         MATRIX[(setting, job, source, destination)] = catalogue_types
@@ -78,7 +73,6 @@ def _add(
 
 # 4.1 Lift and store. "Storage" means both overhead tank and ground-level sump.
 _storage = ["overhead_tank", "ground_sump"]
-
 _add("home", "lift_and_store", "borewell", _storage, ["borewell"])
 _add("home", "lift_and_store", "open_well", _storage, ["openwell"])
 _add("home", "lift_and_store", "underground_sump", _storage, ["self_priming", "openwell"])
@@ -154,6 +148,44 @@ LIFT_HEAD_M = {
     "floors_41_60": 180,
     "floors_above_60": 180,
 }
+
+
+def lift_to_floors(value) -> float:
+    """Return the customer-selected floor count.
+
+    The app now stores lift as a floor-slider number. Legacy band keys are still
+    accepted so older smoke tests and saved answer sets continue to work.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    text = str(value).strip()
+    if text.replace(".", "", 1).isdigit():
+        return max(0.0, float(text))
+    legacy_midpoints = {
+        "ground": 0,
+        "floor_1": 1,
+        "floor_2": 2,
+        "floor_3": 3,
+        "floor_4": 4,
+        "floors_5_10": 10,
+        "floors_11_15": 15,
+        "floors_16_25": 25,
+        "floors_26_40": 40,
+        "floors_41_60": 60,
+        "floors_above_60": 60,
+    }
+    return float(legacy_midpoints.get(text, 0))
+
+
+def lift_to_metres(value) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, str) and value in LIFT_HEAD_M:
+        return float(LIFT_HEAD_M[value])
+    return lift_to_floors(value) * 3.0
+
 
 # Engine volume band -> representative daily litres, default run hours,
 # minimum flow floor, typical flow.
@@ -298,10 +330,7 @@ def available_destinations(setting: str | None, job: str | None, source: str | N
     if not setting or not job or not source or job == "drain_sewage":
         return []
     order = list(DESTINATIONS)
-    return sorted(
-        {dest for s, j, src, dest in MATRIX if s == setting and j == job and src == source and dest},
-        key=order.index,
-    )
+    return sorted({dest for s, j, src, dest in MATRIX if s == setting and j == job and src == source and dest}, key=order.index)
 
 
 def lift_triggered(ans: dict) -> bool:
@@ -359,7 +388,12 @@ def needs_phase_confirm(ans: dict) -> bool:
     if setting in {"farm", "shop_small_comm"}:
         return True
     if setting == "home":
-        if _lift_rank(ans.get("lift")) >= _lift_rank("floors_5_10"):
+        lift_value = ans.get("lift")
+        if isinstance(lift_value, str):
+            high_lift = _lift_rank(lift_value) >= _lift_rank("floors_5_10")
+        else:
+            high_lift = lift_to_floors(lift_value) >= 5
+        if high_lift:
             return True
         depth = float(ans.get("c2_depth_m") or 0)
         if depth >= 90:
@@ -404,6 +438,11 @@ def allowed_c9_max_values(setting: str, phase: str, min_v: int | None = None) ->
     if min_v is None:
         return values
     return [v for v in values if v > min_v]
+
+
+def _intersect_keep_order(a: Iterable[str], b: Iterable[str]) -> list[str]:
+    b_set = set(b)
+    return [x for x in a if x in b_set]
 
 
 def _round_m(x: float) -> float:
@@ -454,10 +493,11 @@ def build_vector(ans: dict) -> dict:
     source = ans.get("source")
     job = ans.get("job")
     setting = ans.get("setting")
+    destination = ans.get("c0_destination")
 
     lift_m = 0.0
     if lift_triggered(ans):
-        lift_m = float(LIFT_HEAD_M.get(ans.get("lift"), 0))
+        lift_m = lift_to_metres(ans.get("lift"))
     elif construction_drain_lift_triggered(ans):
         lift_m = float(ans.get("construction_lift_m") or 0)
         if lift_m <= 3:
@@ -562,14 +602,13 @@ def build_vector(ans: dict) -> dict:
         warnings.append("municipal_marginal_pressure")
         special["municipal_path"] = True
 
-    if ans.get("lift") == "floors_16_25":
+    floors = lift_to_floors(ans.get("lift")) if lift_triggered(ans) else 0
+    if 16 <= floors <= 25 or ans.get("lift") == "floors_16_25":
         warnings.append("staged_pumping_recommended")
-    elif ans.get("lift") == "floors_26_40":
+    elif 26 <= floors <= 40 or ans.get("lift") == "floors_26_40":
         warnings.append("multi_zone_booster_required")
-    elif ans.get("lift") == "floors_41_60":
+    elif floors >= 41 or ans.get("lift") in {"floors_41_60", "floors_above_60"}:
         warnings.append("consultant_review_recommended")
-    elif ans.get("lift") == "floors_above_60":
-        warnings.append("custom_engineering_required")
 
     return {
         "allowed_pump_types": allowed_types,
