@@ -155,12 +155,12 @@ DEMAND_OPTIONS_BY_SETTING = {
         ("vol_5000", "~2,000–5,000 L/day — large independent home or small farmhouse"),
     ],
     "farm": [
-        ("vol_800", "up to ~800 L/day — homestead / no field irrigation"),
-        ("vol_2000", "~800–2,000 L/day — larger homestead / backyard livestock"),
-        ("vol_10000", "~2,000–10,000 L/day — very small irrigated plot or small dairy"),
-        ("vol_50000", "~10,000–50,000 L/day — small-to-mid irrigated farm"),
-        ("vol_200000", "~50,000–200,000 L/day — mid-to-large commercial farm"),
-        ("vol_above_200000", "above ~200,000 L/day — large commercial farm / estate"),
+        ("vol_800", "up to ~800 L/day"),
+        ("vol_2000", "~800–2,000 L/day"),
+        ("vol_10000", "~2,000–10,000 L/day"),
+        ("vol_50000", "~10,000–50,000 L/day"),
+        ("vol_200000", "~50,000–200,000 L/day"),
+        ("vol_above_200000", "above ~200,000 L/day"),
     ],
     "shop_small_comm": [
         ("vol_200", "up to ~200 L/day — kiosk or single-staff outlet"),
@@ -402,16 +402,38 @@ def reset_app():
 def set_answer(field, value, payload=None):
     ans = dict(st.session_state.answers)
     previous = ans.get(field)
+
     if previous != value and field in FIELD_ORDER:
-        for downstream in FIELD_ORDER[FIELD_ORDER.index(field):]:
-            ans.pop(downstream, None)
+        downstream = list(FIELD_ORDER[FIELD_ORDER.index(field):])
+
+        # Farm / agriculture uses the v1.2 pressure-question order:
+        # C5a application pressure class first, then tailored C4 outlet bands,
+        # then C5 simultaneous usage. Because FIELD_ORDER stays generic for
+        # non-Farm paths, selecting C4 or C5 on Farm must not erase the already
+        # selected C5a pressure class.
+        if (
+            ans.get("setting") == "farm"
+            and ans.get("job") == "boost_pressure"
+            and field in {"c4_outlets", "c5_usage"}
+        ):
+            downstream = [downstream_field for downstream_field in downstream if downstream_field != "c5a_pressure"]
+
+        for downstream_field in downstream:
+            ans.pop(downstream_field, None)
+
     ans[field] = value
+
+    # If the Farm pressure class changes, the tailored C4 options and the C5
+    # simultaneous-usage answer must be re-entered because the previous C4
+    # selection may no longer belong to the new Farm application class.
     if field == "c5a_pressure" and ans.get("setting") == "farm" and previous != value:
         ans.pop("c4_outlets", None)
         ans.pop("c5_usage", None)
+
     if field == "job" and value == "drain_sewage":
         ans["source"] = "sewage_pit"
         ans["c0_destination"] = None
+
     st.session_state.answers = ans
 
 
@@ -442,12 +464,12 @@ DEMAND_DESCRIPTIONS_BY_SETTING = {
         "vol_5000": "Large independent home or small farmhouse with 5+ bathrooms, garden, car-wash, occasional pool top-up, or staff quarters.",
     },
     "farm": {
-        "vol_800": "Homestead / farmhouse domestic use only, a few animals, or a hand-watered kitchen garden under ~200 sq ft.",
-        "vol_2000": "Larger homestead or backyard livestock only, troughs, animal washing, or kitchen garden under ~500 sq ft.",
-        "vol_10000": "Very small irrigated plot or small dairy; drip up to ~⅓ acre, sprinkler up to ~¼ acre.",
-        "vol_50000": "Small-to-mid irrigated farm; drip ~⅓–1.5 acres, sprinkler ~¼–1 acre, or livestock-only use.",
-        "vol_200000": "Mid-to-large commercial farm; drip ~1.5–6 acres, sprinkler ~1–5 acres, or larger livestock use.",
-        "vol_above_200000": "Large commercial farm, estate, or plantation with 6+ acres drip, 5+ acres sprinkler, or large livestock use.",
+        "vol_800": "Homestead / farmhouse domestic use only. A few animals or a hand-watered kitchen garden under ~200 sq ft. Livestock: up to ~5 cattle, ~75 small animals, or ~800 poultry.",
+        "vol_2000": "Larger homestead or backyard livestock only. Animal washing, troughs, or a kitchen garden under ~500 sq ft. Livestock: ~5–15 cattle, ~75–200 small animals, or ~800–2,000 poultry.",
+        "vol_10000": "Very small irrigated plot or small dairy. Drip: up to ~⅓ acre. Sprinkler: up to ~¼ acre. Livestock only: 15–70 cattle, 200–1,000 small animals, or 2,000–10,000 poultry.",
+        "vol_50000": "Small-to-mid irrigated farm. Drip: ~⅓–1.5 acres. Sprinkler: ~¼–1 acre. Flood / furrow: up to ~¼ acre per event. Livestock only: 70–350 cattle, 1,000–5,000 small animals, or 10,000–50,000 poultry.",
+        "vol_200000": "Mid-to-large commercial farm. Drip: ~1.5–6 acres. Sprinkler: ~1–5 acres. Flood / furrow: ~¼–1 acre paddy/sugarcane per event. Livestock only: 350–1,500 cattle, 5,000–20,000 small animals, or 50,000–200,000 poultry.",
+        "vol_above_200000": "Large commercial farm, estate, or plantation. Drip: 6+ acres. Sprinkler: 5+ acres. Livestock: 1,500+ cattle, 20,000+ small animals, or 200,000+ poultry.",
     },
     "shop_small_comm": {
         "vol_200": "Kiosk or single-staff outlet with 1–2 staff and one shared washroom.",
