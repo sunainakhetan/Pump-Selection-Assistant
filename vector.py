@@ -1,11 +1,11 @@
 """
-vector.py — Requirement-vector builder aligned to Pump Use-Case Framework v1.1.
+vector.py — Requirement-vector builder aligned to Pump Use-Case Framework v1.2.
 
 This module is the compact contract between the Streamlit questionnaire and
-scoring.py. It implements the v1.1 control matrix, conditional lift, metre-based
+scoring.py. It implements the v1.2 control matrix, conditional lift, metre-based
 source-depth sliders, the 7 m open-ground-water rule, consolidated head formula,
 setting-specific demand bands, Boost-pressure C4/C5/C5a logic, C7 phase defaults,
-C8 duty-cycle run-times, and the corrected C9 voltage-envelope model.
+C8 duty-cycle run-times, and the corrected C9 voltage-envelope model, per-Setting floor sliders, Farm-tailored outlet bands, and two-slider Drain sizing.
 """
 
 from __future__ import annotations
@@ -200,14 +200,16 @@ DEMAND_FLOW = {
     "vol_above_200000": (300000, 10, 50000, 80000),
 }
 
-DRAIN_FLOW = {
-    "trickle": (6000, 10000),
-    "routine_small": (12000, 18000),
-    "steady_moderate": (24000, 36000),
-    "heavy_flow": (60000, 90000),
-    "very_heavy": (120000, 180000),
-    "industrial_large": (300000, 300000),
+DRAIN_QUANTITY_RANGE_BY_SETTING = {
+    "home": (100, 50000),
+    "shop_small_comm": (100, 50000),
+    "farm": (500, 200000),
+    "large_commercial": (500, 500000),
+    "light_industry": (500, 500000),
 }
+
+DRAIN_TIME_HOUR_STOPS = [0.25, 0.5, 0.75, 1, 2, 4, 6, 8]
+DRAIN_HIGH_FLOW_ADVISORY_LPH = 300000
 
 C8_HOURS = {
     "moderate": 4,
@@ -243,6 +245,52 @@ OUTLET_PEAKS = {
         "above_150": 200000,
     },
 }
+
+# v1.2 Farm/agri C4 uses application-specific bands after C5a is chosen.
+FARM_OUTLET_PEAKS_BY_C5A = {
+    "farm_flood": {
+        "farm_flood_1_2": 6000,
+        "farm_flood_3_5": 15000,
+        "farm_flood_6_10": 30000,
+        "farm_flood_above_10": 60000,
+    },
+    "farm_drip": {
+        "farm_drip_1_3": 5400,
+        "farm_drip_4_8": 14400,
+        "farm_drip_9_18": 32400,
+        "farm_drip_above_18": 60000,
+    },
+    "farm_sprinkler": {
+        "farm_sprinkler_1_4": 3600,
+        "farm_sprinkler_5_12": 10800,
+        "farm_sprinkler_13_25": 22500,
+        "farm_sprinkler_26_50": 45000,
+        "farm_sprinkler_above_50": 90000,
+    },
+    # The v1.2 table defines the tailored Farm fixture bands for flood, drip,
+    # and typical sprinkler/wash-down. Rain-gun pressure class remains in the
+    # framework as a high-pressure soft-warning path; use a deliberately larger
+    # rain-gun band set so customers do not see generic tap counts.
+    "farm_rain_gun": {
+        "farm_rain_gun_1": 12000,
+        "farm_rain_gun_2_3": 36000,
+        "farm_rain_gun_4_6": 72000,
+        "farm_rain_gun_above_6": 120000,
+    },
+}
+
+FARM_OUTLET_ALLOWED = {k: set(v) for k, v in FARM_OUTLET_PEAKS_BY_C5A.items()}
+
+
+def outlet_peak_lph(setting: str | None, c5a_pressure: str | None, c4_outlets: str | None) -> float:
+    """Return the C4 notional peak flow before C5 simultaneity."""
+    if not c4_outlets:
+        return 0.0
+    if setting == "farm" and c5a_pressure in FARM_OUTLET_PEAKS_BY_C5A:
+        return float(FARM_OUTLET_PEAKS_BY_C5A[c5a_pressure].get(c4_outlets, 0.0))
+    peak_family = "home_shop" if setting in {"home", "shop_small_comm"} else "farm_industry"
+    return float(OUTLET_PEAKS[peak_family].get(c4_outlets, 0.0))
+
 
 USAGE_MULT = {
     "light": 0.3,
@@ -389,14 +437,11 @@ def needs_phase_confirm(ans: dict) -> bool:
         return True
     if setting == "home":
         lift_value = ans.get("lift")
-        if isinstance(lift_value, str):
-            high_lift = _lift_rank(lift_value) >= _lift_rank("floors_5_10")
-        else:
-            high_lift = lift_to_floors(lift_value) >= 5
+        high_lift = lift_to_metres(lift_value) >= 30
         if high_lift:
             return True
         depth = float(ans.get("c2_depth_m") or 0)
-        if depth >= 90:
+        if depth >= 45:
             return True
         dv = daily_volume(ans)
         return bool(dv is not None and dv >= 10000)
@@ -455,7 +500,7 @@ def _round_m(x: float) -> float:
 
 
 def build_vector(ans: dict) -> dict:
-    """Build the v1.1 requirement vector consumed by scoring.py.
+    """Build the v1.2 requirement vector consumed by scoring.py.
 
     The input answer dictionary is expected to be complete enough for matching.
     Invalid or incomplete matrix combinations return an out-of-scope vector with
@@ -546,10 +591,16 @@ def build_vector(ans: dict) -> dict:
     c5a_typical_floor = 0.0
 
     if job == "drain_sewage":
-        required_min_flow, typical_flow = DRAIN_FLOW[ans["drain_rate"]]
+        quantity_l = float(ans.get("drain_quantity_l") or 0)
+        time_h = float(ans.get("drain_time_h") or 0)
+        if quantity_l > 0 and time_h > 0:
+            required_min_flow = quantity_l / time_h
+            typical_flow = required_min_flow * 1.5
+            special["drain_quantity_l"] = quantity_l
+            special["drain_time_h"] = time_h
         if ans.get("c6_quality"):
             special["cutter_required"] = C6_RULES[ans["c6_quality"]]["cutter"]
-        if ans.get("drain_rate") == "industrial_large":
+        if required_min_flow >= DRAIN_HIGH_FLOW_ADVISORY_LPH:
             warnings.append("custom_engineering_required")
     else:
         rep_daily, default_hours, min_floor, band_typical = DEMAND_FLOW[ans["demand"]]
@@ -559,9 +610,8 @@ def build_vector(ans: dict) -> dict:
         typical_flow = max(float(band_typical), required_min_flow)
 
         if job == "boost_pressure":
-            peak_family = "home_shop" if setting in {"home", "shop_small_comm"} else "farm_industry"
             if ans.get("c4_outlets") and ans.get("c5_usage"):
-                outlet_peak = OUTLET_PEAKS[peak_family][ans["c4_outlets"]]
+                outlet_peak = outlet_peak_lph(setting, ans.get("c5a_pressure"), ans["c4_outlets"])
                 outlet_flow = outlet_peak * USAGE_MULT[ans["c5_usage"]]
 
             if (
@@ -597,6 +647,10 @@ def build_vector(ans: dict) -> dict:
         special["c9_variant"] = "three_phase_range"
         special["c9_min_v"] = ans.get("c9_min_v")
         special["c9_max_v"] = ans.get("c9_max_v")
+
+    if ans.get("water_scarce") and PUMP_TYPES["self_priming"] in allowed_types:
+        special["water_scarce"] = True
+        warnings.append("water_scarcity_slow_speed_advisory")
 
     if source == "municipal":
         warnings.append("municipal_marginal_pressure")
