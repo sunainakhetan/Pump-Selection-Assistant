@@ -113,10 +113,10 @@ def evaluate(a: dict) -> list[tuple[int, str, str]]:
         issues.append((37, "hard", "Municipal / shared piped supply is not enabled for Boost pressure in v1.1."))
 
     # Lift trigger and visibility.
-    if a.get("lift") and not lift_triggered(a):
-        issues.append((11, "hard", "Lift was answered even though this Job × Destination path does not trigger it."))
-    if lift_triggered(a) and not a.get("lift"):
-        issues.append((10, "hard", "Lift is triggered for this path and must be answered."))
+    if a.get("lift") is not None and not lift_triggered(a):
+        issues.append((11, "hard", "Lift was answered even though this path does not need a lift value."))
+    if lift_triggered(a) and a.get("lift") is None:
+        issues.append((10, "hard", "Please select the number of floors the water needs to reach."))
 
     # Source-depth visibility.
     if a.get("source") == "borewell" and a.get("c2_depth_m") is None:
