@@ -1,5 +1,5 @@
 """
-rules.py — Pump Use-Case Framework v1.1 invalidity and warning checks.
+rules.py — Pump Use-Case Framework v1.2 invalidity and warning checks.
 
 The UI uses the matrix helpers in vector.py to disable impossible paths early;
 this module provides transparent rule-style diagnostics for the current partial
@@ -11,6 +11,7 @@ from __future__ import annotations
 from vector import (
     C5A_ALLOWED_BY_SETTING,
     C6_RULES,
+    FARM_OUTLET_ALLOWED,
     FARM_SINGLE_MAX_VALUES,
     FARM_SINGLE_MIN_VALUES,
     JOBS,
@@ -110,7 +111,7 @@ def evaluate(a: dict) -> list[tuple[int, str, str]]:
     if a.get("job") != "drain_sewage" and a.get("source") == "sewage_pit":
         issues.append((36, "hard", "Sewage or drainage pit appears only for Drain sewage / water."))
     if a.get("source") == "municipal" and a.get("job") == "boost_pressure":
-        issues.append((37, "hard", "Municipal / shared piped supply is not enabled for Boost pressure in v1.1."))
+        issues.append((37, "hard", "Municipal / shared piped supply is not enabled for Boost pressure in v1.2."))
 
     # Lift trigger and visibility.
     if a.get("lift") is not None and not lift_triggered(a):
@@ -144,6 +145,9 @@ def evaluate(a: dict) -> list[tuple[int, str, str]]:
             issues.append((40, "hard", "Boost pressure requires C5a fixture / application pressure class."))
         if a.get("c5a_pressure") and a.get("setting") and a["c5a_pressure"] not in C5A_ALLOWED_BY_SETTING[a["setting"]]:
             issues.append((41, "hard", "C5a answer is not in the Setting-specific option set."))
+        if a.get("setting") == "farm" and a.get("c5a_pressure") in FARM_OUTLET_ALLOWED and a.get("c4_outlets"):
+            if a["c4_outlets"] not in FARM_OUTLET_ALLOWED[a["c5a_pressure"]]:
+                issues.append((41, "hard", "C4 fixture count is not valid for the selected Farm pressure class."))
     else:
         for key_name in ("c4_outlets", "c5_usage", "c5a_pressure"):
             if a.get(key_name):
@@ -152,8 +156,14 @@ def evaluate(a: dict) -> list[tuple[int, str, str]]:
 
     # Drain quality.
     if a.get("job") == "drain_sewage":
-        if not a.get("drain_rate"):
-            issues.append((45, "hard", "Drain sewage / water requires the water-removal-rate band."))
+        if a.get("drain_quantity_l") is None:
+            issues.append((45, "hard", "Drain sewage / water requires the quantity slider."))
+        elif float(a.get("drain_quantity_l") or 0) <= 0:
+            issues.append((45, "hard", "Drain quantity must be greater than zero."))
+        if a.get("drain_time_h") is None:
+            issues.append((45, "hard", "Drain sewage / water requires the time-to-clear slider."))
+        elif float(a.get("drain_time_h") or 0) <= 0:
+            issues.append((45, "hard", "Drain time must be greater than zero."))
         if not a.get("c6_quality"):
             issues.append((45, "hard", "Drain sewage / water requires C6 water quality / contents."))
         elif a["c6_quality"] not in C6_RULES:
