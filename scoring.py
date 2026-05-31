@@ -1,5 +1,5 @@
 """
-scoring.py — v1.1 hard-filter pipeline and midpoint ranking.
+scoring.py — v1.2 hard-filter pipeline and midpoint ranking.
 
 The catalogue has Min/Max Head and Min/Max Flow ranges rather than full pump
 curves, so ranking uses the framework's midpoint approximation: hydraulic fit
@@ -9,7 +9,6 @@ voltage robustness, Self-Priming speed, and municipal-path conservatism.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
@@ -44,7 +43,7 @@ def _trace(trace, step, label, work):
 
 
 def filter_skus(df: pd.DataFrame, vec: dict):
-    """Apply the ordered v1.1 hard filters and return (survivors, trace)."""
+    """Apply the ordered v1.2 hard filters and return (survivors, trace)."""
 
     trace = []
     work = df.copy()
@@ -77,7 +76,7 @@ def filter_skus(df: pd.DataFrame, vec: dict):
     allowed = vec.get("allowed_pump_types", [])
     if not allowed or vec.get("special", {}).get("out_of_scope"):
         work = work.iloc[0:0]
-        _trace(trace, 2, "Out of enabled v1.1 matrix scope", work)
+        _trace(trace, 2, "Out of enabled v1.2 matrix scope", work)
         return work, trace
 
     work = work[work["Type"].isin(allowed)]
@@ -118,7 +117,7 @@ def filter_skus(df: pd.DataFrame, vec: dict):
         work,
     )
 
-    # Corrected v1.1 voltage filter.
+    # Corrected v1.2 voltage filter.
     special = vec.get("special", {})
     variant = special.get("c9_variant")
     if variant == "single_band":
@@ -275,7 +274,7 @@ def _row_flags_from_vector(vec: dict) -> list[str]:
 
 
 def score_skus(df: pd.DataFrame, vec: dict):
-    """Score survivors using the v1.1 midpoint method and stable tie-breakers."""
+    """Score survivors using the v1.2 midpoint method and stable tie-breakers."""
 
     if len(df) == 0:
         return df.assign(score=pd.Series(dtype=float), flags=pd.Series(dtype=object))
@@ -393,8 +392,10 @@ def lift_flags(ans: dict) -> list[tuple[str, str]]:
         flags.append(("multi_zone_booster_required", "Multi-zone booster scheme is typically used for 26–40 floors."))
     elif floors >= 41:
         flags.append(("consultant_review_recommended", "Consultant review is recommended for 41+ floor schemes."))
-    if ans.get("drain_rate") == "industrial_large":
-        flags.append(("custom_engineering_required", "Industrial / large-scale dewatering usually needs a multi-pump or consultant design."))
+    quantity = float(ans.get("drain_quantity_l") or 0)
+    time_h = float(ans.get("drain_time_h") or 0)
+    if time_h > 0 and quantity / time_h >= 300000:
+        flags.append(("custom_engineering_required", "Very high drainage flow usually needs a multi-pump or consultant design."))
     if ans.get("water_scarce"):
         flags.append(("water_scarcity_slow_speed_advisory", "For intermittent or water-scarce supply, slow-speed self-priming options are prioritised where suitable."))
     return flags
